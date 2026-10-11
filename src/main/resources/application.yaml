@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: smarthome-backend
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/smarthome}
+    username: ${DB_USER:smarthome}
+    password: ${DB_PASSWORD:smarthome}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+smarthome:
+  mqtt:
+    url: ${MQTT_URL:tcp://localhost:1883}
+    username: ${MQTT_USER:}
+    password: ${MQTT_PASSWORD:}
+    client-id: smarthome-backend
+    z2m-base-topic: zigbee2mqtt
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
