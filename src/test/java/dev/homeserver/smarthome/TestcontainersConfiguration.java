@@ -29,6 +29,15 @@ public class TestcontainersConfiguration {
 		return registry -> registry.add("smarthome.mqtt.url", () -> mqttUrl(mosquittoContainer));
 	}
 
+	@Bean
+	DynamicPropertyRegistrar authProperties() {
+		return registry -> {
+			registry.add("smarthome.auth.jwk-set-uri", TestJwts::jwkSetUri);
+			registry.add("smarthome.auth.issuer", () -> TestJwts.ISSUER);
+			registry.add("smarthome.auth.initial-admin", () -> "admin@example.com");
+		};
+	}
+
 	public static String mqttUrl(GenericContainer<?> mosquitto) {
 		return "tcp://" + mosquitto.getHost() + ":" + mosquitto.getMappedPort(1883);
 	}

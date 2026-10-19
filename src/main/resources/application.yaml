@@ -5,11 +5,6 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/smarthome}
     username: ${DB_USER:smarthome}
     password: ${DB_PASSWORD:smarthome}
-  security:
-    user:
-      # Temporary single admin until real users exist
-      name: ${ADMIN_USER:admin}
-      password: ${ADMIN_PASSWORD:admin}
   mvc:
     # Errors as RFC 9457 problem details, including the reason (e.g. why a command was refused)
     problemdetails:
@@ -20,6 +15,12 @@ spring:
     open-in-view: false
 
 smarthome:
+  auth:
+    # Public keys of the Kratos tokenizer; the default fits a checkout next to homeserver-infra
+    jwk-set-uri: ${AUTH_JWKS:file:../homeserver-infra/auth/kratos/secrets/jwks.public.json}
+    issuer: ${AUTH_ISSUER:http://localhost:4433/}
+    # Kratos identity id or email of the first admin (gets the admin role on every sign-in)
+    initial-admin: ${AUTH_INITIAL_ADMIN:}
   mqtt:
     url: ${MQTT_URL:tcp://localhost:1883}
     username: ${MQTT_USER:}
