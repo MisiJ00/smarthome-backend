@@ -1,8 +1,6 @@
 package dev.homeserver.smarthome.user;
 
-import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,10 +35,9 @@ public class UserService {
 			user.getRoles().add(roles.findByName(Role.ADMIN).orElseThrow());
 		}
 		if (!user.isActive()) {
-			throw new UserDisabledException(identityId);
+			throw new UserDisabledException(user);
 		}
-		Set<String> roleNames = user.getRoles().stream().map(Role::getName).collect(Collectors.toUnmodifiableSet());
-		return new CurrentUser(user.getId(), identityId, user.getName(), email, roleNames);
+		return CurrentUser.of(user, email);
 	}
 
 	private boolean isInitialAdmin(UUID identityId, String email) {

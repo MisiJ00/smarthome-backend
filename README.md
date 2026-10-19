@@ -42,6 +42,17 @@ The backend has no login of its own. Apps sign in at Ory Kratos and send a short
 
 The backend checks the signature with the public key, then looks up the user by the Kratos identity id (`sub`) and creates it on the first request. Roles live here, not in Kratos. The person configured in `AUTH_INITIAL_ADMIN` always gets the `admin` role. `GET /api/me` shows who you are. Until grants exist, the device API is admin only. Full curl walkthrough: `homeserver-infra/auth/README.md`.
 
+## Machine tokens
+
+The AI and scripts don't sign in at Kratos. They send an API token instead: `Authorization: Bearer shm_...`. Tokens belong to machine users (users without a Kratos identity). Migration V3 creates the first one, `KI` with role `ki`. Machine users go through the same role checks as people. Only the SHA-256 hash of a token is stored.
+
+| Call (admin only) | What it does |
+| --- | --- |
+| `GET /api/tokens/machine-users` | Users that can get tokens, with their id |
+| `POST /api/tokens` | `{"userId": 6, "name": "Ollama"}`, returns the token as `secret` once |
+| `GET /api/tokens` | All tokens with `lastUsed`, never the secret |
+| `DELETE /api/tokens/{id}` | Revoke, takes effect on the next request |
+
 ## Simulator
 
 Without hardware, the simulator pretends to be Zigbee2MQTT on the same Mosquitto: a lamp, a radiator thermostat, a power-metering plug (stands in for the server plug) and a door lock. Start it in a second terminal:

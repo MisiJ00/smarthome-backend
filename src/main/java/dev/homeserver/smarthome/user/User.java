@@ -63,6 +63,11 @@ public class User {
 		return roles;
 	}
 
+	/** Machine users (AI, scripts) sign in with API tokens instead of Kratos. */
+	public boolean isMachine() {
+		return identityId == null;
+	}
+
 	public boolean hasRole(String role) {
 		return roles.stream().anyMatch(r -> r.getName().equals(role));
 	}
