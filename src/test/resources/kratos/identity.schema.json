@@ -1,0 +1,45 @@
+{
+  "$id": "https://homeserver.local/schemas/person.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Person",
+  "type": "object",
+  "properties": {
+    "traits": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "title": "E-Mail",
+          "maxLength": 320,
+          "ory.sh/kratos": {
+            "credentials": {
+              "password": { "identifier": true },
+              "totp": { "account_name": true }
+            },
+            "verification": { "via": "email" },
+            "recovery": { "via": "email" }
+          }
+        },
+        "username": {
+          "type": "string",
+          "title": "Benutzername",
+          "pattern": "^[a-z0-9._-]{3,32}$",
+          "ory.sh/kratos": {
+            "credentials": {
+              "password": { "identifier": true }
+            }
+          }
+        },
+        "name": {
+          "type": "string",
+          "title": "Name",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": ["email", "username", "name"],
+      "additionalProperties": false
+    }
+  }
+}

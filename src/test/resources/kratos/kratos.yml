@@ -1,0 +1,49 @@
+# Kratos for the tests: like homeserver-infra/auth/kratos/kratos.yml, but in memory and with fixed test secrets.
+# Runs with --dev, so the recovery cookies also work over plain http.
+version: v26.2.0
+dsn: memory
+serve:
+  public:
+    base_url: http://localhost:4433/
+  admin:
+    base_url: http://localhost:4434/
+
+selfservice:
+  default_browser_return_url: http://localhost:4433/
+  allowed_return_urls:
+    - http://localhost:4433/
+  methods:
+    password:
+      enabled: true
+      config:
+        min_password_length: 10
+        identifier_similarity_check_enabled: true
+        haveibeenpwned_enabled: false
+    code:
+      enabled: true
+  flows:
+    registration:
+      enabled: true
+    settings:
+      privileged_session_max_age: 15m
+    verification:
+      enabled: false
+    recovery:
+      enabled: true
+      use: code
+
+identity:
+  default_schema_id: person
+  schemas:
+    - id: person
+      url: file:///etc/config/kratos/identity.schema.json
+
+courier:
+  smtp:
+    connection_uri: smtp://mail.invalid:25/?disable_starttls=true
+
+secrets:
+  cookie:
+    - test-cookie-secret-0123456789abcdef
+  cipher:
+    - 0123456789abcdef0123456789abcdef

@@ -21,6 +21,11 @@ smarthome:
     issuer: ${AUTH_ISSUER:http://localhost:4433/}
     # Kratos identity id or email of the first admin (gets the admin role on every sign-in)
     initial-admin: ${AUTH_INITIAL_ADMIN:}
+  kratos:
+    # Kratos admin API for creating and managing accounts; only reachable inside the Docker network
+    admin-url: ${KRATOS_ADMIN_URL:}
+    # How long the setup code for a new account is valid
+    setup-code-lifetime: ${KRATOS_SETUP_CODE_LIFETIME:24h}
   mqtt:
     url: ${MQTT_URL:tcp://localhost:1883}
     username: ${MQTT_USER:}

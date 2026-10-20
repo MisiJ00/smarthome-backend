@@ -40,7 +40,8 @@ public class SecurityConfig {
 						.requestMatchers("/api/me").authenticated()
 						.requestMatchers(HttpMethod.GET, "/api/rooms", "/api/rooms/**").authenticated()
 						.requestMatchers("/api/rooms", "/api/rooms/**").hasRole(Role.ADMIN)
-						.requestMatchers("/api/devices/**", "/api/tokens/**").hasRole(Role.ADMIN)
+						.requestMatchers("/api/devices/**", "/api/tokens/**", "/api/users", "/api/users/**", "/api/roles",
+								"/api/roles/**", "/api/grants", "/api/grants/**").hasRole(Role.ADMIN)
 						.anyRequest().authenticated())
 				.oauth2ResourceServer(oauth2 -> oauth2.authenticationManagerResolver(request -> bearerTokens))
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

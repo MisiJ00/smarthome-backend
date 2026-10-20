@@ -21,15 +21,21 @@ public class UserService {
 	}
 
 	/**
-	 * Returns the user for a Kratos identity, creating it on its first request. Keeps the name in sync with Kratos
+	 * Returns the user for a Kratos identity, creating it on its first request. Keeps name, email and username in sync with Kratos
 	 * and makes sure the initial admin from the configuration has the admin role.
 	 */
 	@Transactional
-	public CurrentUser signIn(UUID identityId, String name, String email) {
+	public CurrentUser signIn(UUID identityId, String name, String email, String username) {
 		users.insertIfMissing(identityId, name);
 		User user = users.findByIdentityId(identityId).orElseThrow();
 		if (!name.equals(user.getName())) {
 			user.setName(name);
+		}
+		if (email != null && !email.equals(user.getEmail())) {
+			user.setEmail(email);
+		}
+		if (username != null && !username.equals(user.getUsername())) {
+			user.setUsername(username);
 		}
 		if (isInitialAdmin(identityId, email) && !user.hasRole(Role.ADMIN)) {
 			user.getRoles().add(roles.findByName(Role.ADMIN).orElseThrow());

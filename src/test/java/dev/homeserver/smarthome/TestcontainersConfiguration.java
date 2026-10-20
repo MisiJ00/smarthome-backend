@@ -5,8 +5,10 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Bean;
 import org.springframework.test.context.DynamicPropertyRegistrar;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
+import org.testcontainers.utility.MountableFile;
 
 @TestConfiguration(proxyBeanMethods = false)
 public class TestcontainersConfiguration {
@@ -27,6 +29,29 @@ public class TestcontainersConfiguration {
 	@Bean
 	DynamicPropertyRegistrar mqttProperties(GenericContainer<?> mosquittoContainer) {
 		return registry -> registry.add("smarthome.mqtt.url", () -> mqttUrl(mosquittoContainer));
+	}
+
+	/** Real Kratos, in memory, for the admin API (accounts, setup codes) and to redeem setup codes like the app. */
+	@Bean
+	GenericContainer<?> kratosContainer() {
+		return new GenericContainer<>(DockerImageName.parse("oryd/kratos:v26.2.0"))
+				.withCopyFileToContainer(MountableFile.forClasspathResource("kratos/"), "/etc/config/kratos/")
+				.withCommand("serve", "--config", "/etc/config/kratos/kratos.yml", "--dev", "--sqa-opt-out")
+				.withExposedPorts(4433, 4434)
+				.waitingFor(Wait.forHttp("/health/ready").forPort(4434));
+	}
+
+	@Bean
+	DynamicPropertyRegistrar kratosProperties(GenericContainer<?> kratosContainer) {
+		return registry -> registry.add("smarthome.kratos.admin-url", () -> kratosAdminUrl(kratosContainer));
+	}
+
+	public static String kratosAdminUrl(GenericContainer<?> kratos) {
+		return "http://" + kratos.getHost() + ":" + kratos.getMappedPort(4434);
+	}
+
+	public static String kratosPublicUrl(GenericContainer<?> kratos) {
+		return "http://" + kratos.getHost() + ":" + kratos.getMappedPort(4433);
 	}
 
 	@Bean

@@ -64,9 +64,9 @@ public class KratosJwtConfig {
 				throw new InvalidBearerTokenException("Subject is not a Kratos identity id");
 			}
 			String email = jwt.getClaimAsString("email");
-			String name = firstNonBlank(jwt.getClaimAsString("name"), jwt.getClaimAsString("preferred_username"), email,
-					jwt.getSubject());
-			return new UserAuthentication(users.signIn(identityId, name, email), jwt);
+			String username = jwt.getClaimAsString("preferred_username");
+			String name = firstNonBlank(jwt.getClaimAsString("name"), username, email, jwt.getSubject());
+			return new UserAuthentication(users.signIn(identityId, name, email, username), jwt);
 		};
 	}
 
