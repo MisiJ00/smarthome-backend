@@ -3,6 +3,7 @@ package dev.homeserver.smarthome.security;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
@@ -24,7 +25,8 @@ import io.swagger.v3.oas.models.security.SecurityScheme;
 public class SecurityConfig {
 
 	// Every request carries a bearer token, no sessions: a Kratos JWT (people) or an API token (machines).
-	// Only health and API docs are public. Until grants and can() exist, the device API is admin only.
+	// Only health and API docs are public. Everyone signed in can read rooms, only admins change them.
+	// Until grants and can() exist, the device API is admin only.
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http, JwtDecoder jwtDecoder,
 			Converter<Jwt, AbstractAuthenticationToken> kratosJwtConverter, ApiTokenService apiTokens) throws Exception {
@@ -36,6 +38,8 @@ public class SecurityConfig {
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers("/actuator/health", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 						.requestMatchers("/api/me").authenticated()
+						.requestMatchers(HttpMethod.GET, "/api/rooms", "/api/rooms/**").authenticated()
+						.requestMatchers("/api/rooms", "/api/rooms/**").hasRole(Role.ADMIN)
 						.requestMatchers("/api/devices/**", "/api/tokens/**").hasRole(Role.ADMIN)
 						.anyRequest().authenticated())
 				.oauth2ResourceServer(oauth2 -> oauth2.authenticationManagerResolver(request -> bearerTokens))

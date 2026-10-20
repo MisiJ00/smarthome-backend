@@ -12,8 +12,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -29,9 +31,25 @@ public class DeviceController {
 		this.service = service;
 	}
 
+	/** All devices, or with {@code roomId} only those in one room ({@code roomId=none}: devices without a room). */
 	@GetMapping
-	public List<DeviceResponse> list() {
-		return service.list().stream().map(DeviceResponse::from).toList();
+	public List<DeviceResponse> list(@RequestParam(required = false) String roomId) {
+		List<Device> devices;
+		if (roomId == null) {
+			devices = service.list();
+		}
+		else if (roomId.equals("none")) {
+			devices = service.listWithoutRoom();
+		}
+		else {
+			try {
+				devices = service.listInRoom(Long.parseLong(roomId));
+			}
+			catch (NumberFormatException e) {
+				throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "roomId must be a room id or \"none\"");
+			}
+		}
+		return devices.stream().map(DeviceResponse::from).toList();
 	}
 
 	/** Devices the adapters can see but that have not been added yet. */
@@ -53,7 +71,8 @@ public class DeviceController {
 
 	@PatchMapping("/{id}")
 	public DeviceResponse update(@PathVariable long id, @RequestBody UpdateDeviceRequest request) {
-		return DeviceResponse.from(service.update(id, request.name(), request.roomId(), request.lockedActions()));
+		return DeviceResponse.from(service.update(id, request.getName(), request.isRoomIdSet(), request.getRoomId(),
+				request.getLockedActions()));
 	}
 
 	@DeleteMapping("/{id}")
@@ -95,8 +114,46 @@ public class DeviceController {
 			Long roomId) {
 	}
 
-	/** Fields left out (null) stay unchanged. */
-	public record UpdateDeviceRequest(String name, Long roomId, List<String> lockedActions) {
+	/**
+	 * Fields left out stay unchanged; {@code "roomId": null} takes the device out of its room. A class instead of a
+	 * record so that an explicit null can be told apart from a missing field.
+	 */
+	public static class UpdateDeviceRequest {
+
+		private String name;
+		private Long roomId;
+		private boolean roomIdSet;
+		private List<String> lockedActions;
+
+		public String getName() {
+			return name;
+		}
+
+		public void setName(String name) {
+			this.name = name;
+		}
+
+		public Long getRoomId() {
+			return roomId;
+		}
+
+		public void setRoomId(Long roomId) {
+			this.roomId = roomId;
+			this.roomIdSet = true;
+		}
+
+		boolean isRoomIdSet() {
+			return roomIdSet;
+		}
+
+		public List<String> getLockedActions() {
+			return lockedActions;
+		}
+
+		public void setLockedActions(List<String> lockedActions) {
+			this.lockedActions = lockedActions;
+		}
+
 	}
 
 }

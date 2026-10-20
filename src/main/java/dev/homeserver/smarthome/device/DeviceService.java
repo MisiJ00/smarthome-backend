@@ -13,20 +13,37 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import dev.homeserver.smarthome.room.RoomRepository;
+
 @Service
 public class DeviceService {
 
 	private final DeviceRepository devices;
+	private final RoomRepository rooms;
 	private final Map<String, DeviceAdapter> adapters;
 
-	public DeviceService(DeviceRepository devices, List<DeviceAdapter> adapters) {
+	public DeviceService(DeviceRepository devices, RoomRepository rooms, List<DeviceAdapter> adapters) {
 		this.devices = devices;
+		this.rooms = rooms;
 		this.adapters = adapters.stream().collect(Collectors.toMap(DeviceAdapter::name, Function.identity()));
 	}
 
 	@Transactional(readOnly = true)
 	public List<Device> list() {
 		return devices.findAll();
+	}
+
+	@Transactional(readOnly = true)
+	public List<Device> listInRoom(long roomId) {
+		if (!rooms.existsById(roomId)) {
+			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No room with id " + roomId);
+		}
+		return devices.findByRoomId(roomId);
+	}
+
+	@Transactional(readOnly = true)
+	public List<Device> listWithoutRoom() {
+		return devices.findByRoomIdIsNull();
 	}
 
 	@Transactional(readOnly = true)
@@ -49,6 +66,9 @@ public class DeviceService {
 		if (devices.existsByAdapterAndExternalId(adapter, externalId)) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "Device has already been added");
 		}
+		if (roomId != null && !rooms.existsById(roomId)) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Room does not exist");
+		}
 		var discovered = adapter(adapter).discovered().stream()
 				.filter(d -> d.externalId().equals(externalId))
 				.findFirst()
@@ -57,13 +77,17 @@ public class DeviceService {
 		return save(new Device(discovered, name, roomId));
 	}
 
+	/** Null fields stay unchanged. With {@code setRoom} the device moves to {@code roomId}, null meaning no room. */
 	@Transactional
-	public Device update(long id, String name, Long roomId, List<String> lockedActions) {
+	public Device update(long id, String name, boolean setRoom, Long roomId, List<String> lockedActions) {
 		var device = get(id);
 		if (name != null) {
 			device.setName(name);
 		}
-		if (roomId != null) {
+		if (setRoom) {
+			if (roomId != null && !rooms.existsById(roomId)) {
+				throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Room does not exist");
+			}
 			device.setRoomId(roomId);
 		}
 		if (lockedActions != null) {

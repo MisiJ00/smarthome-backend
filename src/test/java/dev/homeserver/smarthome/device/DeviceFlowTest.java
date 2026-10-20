@@ -94,7 +94,7 @@ class DeviceFlowTest {
 				.untilAsserted(() -> assertThat(received.get("zigbee2mqtt/Test Lampe/set")).isEqualTo("{\"brightness\":200}"));
 
 		// Locked actions are refused before anything is sent
-		service.update(device.getId(), null, null, List.of("switch_off"));
+		service.update(device.getId(), null, false, null, List.of("switch_off"));
 		assertThatThrownBy(() -> service.command(device.getId(), Map.of("state", "OFF")))
 				.isInstanceOf(CommandRefusedException.class);
 	}
