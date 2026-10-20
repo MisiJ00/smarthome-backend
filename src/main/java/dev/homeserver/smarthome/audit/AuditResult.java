@@ -30,7 +30,15 @@ public enum AuditResult {
 
 	/** Nobody decided in time. */
 	@JsonProperty("expired")
-	EXPIRED;
+	EXPIRED,
+
+	/** A phone was registered for signed approvals. */
+	@JsonProperty("registered")
+	REGISTERED,
+
+	/** A phone was revoked. */
+	@JsonProperty("revoked")
+	REVOKED;
 
 	public String dbValue() {
 		return name().toLowerCase();

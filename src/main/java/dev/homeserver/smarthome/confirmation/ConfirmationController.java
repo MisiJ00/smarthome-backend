@@ -9,6 +9,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -16,27 +17,34 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import dev.homeserver.smarthome.audit.Via;
+import dev.homeserver.smarthome.confirmation.ConfirmationService.Challenge;
+import dev.homeserver.smarthome.confirmation.ConfirmationService.SignedApproval;
 import dev.homeserver.smarthome.device.Device;
 import dev.homeserver.smarthome.device.DeviceRepository;
 import dev.homeserver.smarthome.grant.Action;
+import dev.homeserver.smarthome.trusteddevice.TrustedDeviceService;
 import dev.homeserver.smarthome.user.CurrentUser;
 import dev.homeserver.smarthome.user.User;
 import dev.homeserver.smarthome.user.UserRepository;
 
 /**
  * Confirmations: everyone sees the requests they made and those they may decide (admins: all). Deciding needs a
- * person other than the requester who is an admin or may do the action on the device themselves.
+ * person other than the requester who is an admin or may do the action on the device themselves; with a signature
+ * from a registered phone (Face ID / fingerprint) people may also approve their own request.
  */
 @RestController
 @RequestMapping("/api/confirmations")
 public class ConfirmationController {
 
 	private final ConfirmationService service;
+	private final TrustedDeviceService trustedDevices;
 	private final UserRepository users;
 	private final DeviceRepository devices;
 
-	public ConfirmationController(ConfirmationService service, UserRepository users, DeviceRepository devices) {
+	public ConfirmationController(ConfirmationService service, TrustedDeviceService trustedDevices,
+			UserRepository users, DeviceRepository devices) {
 		this.service = service;
+		this.trustedDevices = trustedDevices;
 		this.users = users;
 		this.devices = devices;
 	}
@@ -54,11 +62,25 @@ public class ConfirmationController {
 		return response(me, service.get(me, id));
 	}
 
-	/** Sends the command. 409 if already decided or expired, 403 if the caller may not decide. */
+	/**
+	 * A one-time challenge for approving with a phone: the phone signs {@code payload} (SHA256withECDSA, after Face ID
+	 * or a fingerprint) and sends the signature to {@code /approve} within {@code expiresAt}.
+	 */
+	@PostMapping("/{id}/challenge")
+	public Challenge challenge(@AuthenticationPrincipal CurrentUser me, @PathVariable long id) {
+		return service.challenge(me, id);
+	}
+
+	/**
+	 * Sends the command. Without a body the usual rules apply (another person decides); with
+	 * {@code {trustedDeviceId, nonce, signature}} from a registered phone people may also approve their own request.
+	 * 409 if already decided or expired, 403 if the caller may not decide or the signature is invalid.
+	 */
 	@PostMapping("/{id}/approve")
 	public ConfirmationResponse approve(@AuthenticationPrincipal CurrentUser me, @PathVariable long id,
-			@RequestHeader(name = Via.HEADER, required = false) String client) {
-		return response(me, service.approve(me, Via.of(me, client), id));
+			@RequestHeader(name = Via.HEADER, required = false) String client,
+			@RequestBody(required = false) SignedApproval signed) {
+		return response(me, service.approve(me, Via.of(me, client), id, signed));
 	}
 
 	@PostMapping("/{id}/reject")
@@ -71,11 +93,13 @@ public class ConfirmationController {
 	 * @param params    the command that is sent once approved
 	 * @param mine      the caller asked for it
 	 * @param canDecide the caller may approve or reject it (while it is pending)
+	 * @param canApproveWithPhone the caller may approve it with a signature from a registered phone, their own
+	 * request included (while it is pending)
 	 */
 	public record ConfirmationResponse(long id, long userId, String userName, long deviceId, String deviceName,
 			Action action, Map<String, Object> params, ConfirmationStatus status, Via via, Instant createdAt,
 			Instant expiresAt, Long decidedBy, String decidedByName, Instant decidedAt, boolean mine,
-			boolean canDecide) {
+			boolean canDecide, boolean canApproveWithPhone) {
 	}
 
 	private ConfirmationResponse response(CurrentUser me, Confirmation c) {
@@ -83,10 +107,12 @@ public class ConfirmationController {
 		String deviceName = devices.findById(c.getDeviceId()).map(Device::getName).orElse(null);
 		String decidedByName = c.getDecidedBy() == null ? null
 				: users.findById(c.getDecidedBy()).map(User::getName).orElse(null);
-		boolean canDecide = c.getStatus() == ConfirmationStatus.PENDING && service.canDecide(me, c);
+		boolean pending = c.getStatus() == ConfirmationStatus.PENDING;
+		boolean canDecide = pending && service.canDecide(me, c);
+		boolean withPhone = pending && service.canApproveSigned(me, c) && trustedDevices.hasActive(me.id());
 		return new ConfirmationResponse(c.getId(), c.getUserId(), userName, c.getDeviceId(), deviceName, c.getAction(),
 				c.getParams(), c.getStatus(), c.getVia(), c.getCreatedAt(), c.getExpiresAt(), c.getDecidedBy(),
-				decidedByName, c.getDecidedAt(), c.getUserId() == me.id(), canDecide);
+				decidedByName, c.getDecidedAt(), c.getUserId() == me.id(), canDecide, withPhone);
 	}
 
 	private static ConfirmationStatus parseStatus(String status) {
