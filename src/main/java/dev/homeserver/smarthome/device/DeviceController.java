@@ -12,12 +12,14 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import dev.homeserver.smarthome.audit.Via;
 import dev.homeserver.smarthome.device.DeviceService.CommandStatus;
 import dev.homeserver.smarthome.grant.Action;
 import dev.homeserver.smarthome.grant.PermissionService;
@@ -105,16 +107,23 @@ public class DeviceController {
 	/**
 	 * Sends a command, e.g. {@code {"state": "ON", "brightness": 120}}. The new state arrives asynchronously once the
 	 * device reports it. 403 if the action is locked for the device or the caller lacks {@code control} (or
-	 * {@code unlock}). If a confirmation is required, nothing is sent ({@code status: confirmation_required}).
+	 * {@code unlock}). If a confirmation is required, nothing is sent: {@code status: confirmation_required} with the
+	 * id of the new confirmation. Clients name themselves in {@code X-Smarthome-Client} (web, app, widget) for the
+	 * audit log.
 	 */
 	@PostMapping("/{id}/commands")
 	@ResponseStatus(HttpStatus.ACCEPTED)
 	public CommandResponse command(@AuthenticationPrincipal CurrentUser me, @PathVariable long id,
+			@RequestHeader(name = Via.HEADER, required = false) String client,
 			@RequestBody @NotEmpty Map<String, Object> command) {
-		return new CommandResponse(service.command(me, id, command));
+		var outcome = service.command(me, Via.of(me, client), id, command);
+		var confirmation = outcome.confirmation();
+		return new CommandResponse(outcome.status(), confirmation == null ? null : confirmation.getId(),
+				confirmation == null ? null : confirmation.getExpiresAt());
 	}
 
-	public record CommandResponse(CommandStatus status) {
+	/** With a confirmation: its id (see {@code /api/confirmations}) and until when someone has to decide. */
+	public record CommandResponse(CommandStatus status, Long confirmationId, Instant expiresAt) {
 	}
 
 	/** What the caller may do with a device. */

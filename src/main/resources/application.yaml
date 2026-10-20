@@ -26,6 +26,9 @@ smarthome:
     admin-url: ${KRATOS_ADMIN_URL:}
     # How long the setup code for a new account is valid
     setup-code-lifetime: ${KRATOS_SETUP_CODE_LIFETIME:24h}
+  confirmations:
+    # How long a confirmation (e.g. unlocking the door) waits for someone to decide
+    lifetime: ${CONFIRMATION_LIFETIME:5m}
   mqtt:
     url: ${MQTT_URL:tcp://localhost:1883}
     username: ${MQTT_USER:}

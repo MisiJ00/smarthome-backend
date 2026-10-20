@@ -3,8 +3,6 @@ package dev.homeserver.smarthome.device;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import org.springframework.context.event.EventListener;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -15,6 +13,11 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import dev.homeserver.smarthome.audit.AuditResult;
+import dev.homeserver.smarthome.audit.AuditService;
+import dev.homeserver.smarthome.audit.Via;
+import dev.homeserver.smarthome.confirmation.Confirmation;
+import dev.homeserver.smarthome.confirmation.ConfirmationService;
 import dev.homeserver.smarthome.grant.Action;
 import dev.homeserver.smarthome.grant.PermissionService;
 import dev.homeserver.smarthome.grant.PermissionService.Access;
@@ -32,14 +35,18 @@ public class DeviceService {
 	private final DeviceRepository devices;
 	private final RoomRepository rooms;
 	private final PermissionService permissions;
-	private final Map<String, DeviceAdapter> adapters;
+	private final ConfirmationService confirmations;
+	private final AuditService audit;
+	private final DeviceCommandSender sender;
 
 	public DeviceService(DeviceRepository devices, RoomRepository rooms, PermissionService permissions,
-			List<DeviceAdapter> adapters) {
+			ConfirmationService confirmations, AuditService audit, DeviceCommandSender sender) {
 		this.devices = devices;
 		this.rooms = rooms;
 		this.permissions = permissions;
-		this.adapters = adapters.stream().collect(Collectors.toMap(DeviceAdapter::name, Function.identity()));
+		this.confirmations = confirmations;
+		this.audit = audit;
+		this.sender = sender;
 	}
 
 	/** What a command led to: sent to the device, or waiting for a confirmation. */
@@ -89,7 +96,7 @@ public class DeviceService {
 	/** Devices the adapters can see that have not been added yet. */
 	@Transactional(readOnly = true)
 	public List<DiscoveredDevice> discovered() {
-		return adapters.values().stream()
+		return sender.all().stream()
 				.flatMap(adapter -> adapter.discovered().stream())
 				.filter(d -> !devices.existsByAdapterAndExternalId(d.adapter(), d.externalId()))
 				.toList();
@@ -103,7 +110,7 @@ public class DeviceService {
 		if (roomId != null && !rooms.existsById(roomId)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Room does not exist");
 		}
-		var discovered = adapter(adapter).discovered().stream()
+		var discovered = sender.adapter(adapter).discovered().stream()
 				.filter(d -> d.externalId().equals(externalId))
 				.findFirst()
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -146,29 +153,45 @@ public class DeviceService {
 		devices.delete(get(id));
 	}
 
+	/** What a command led to; the confirmation is set when one was created. */
+	public record CommandOutcome(CommandStatus status, Confirmation confirmation) {
+	}
+
 	/**
 	 * Locked actions are refused for everyone (403). Then {@code can()}: unlocking needs {@code unlock}, everything
-	 * else {@code control}. If a confirmation is required, nothing is sent yet.
+	 * else {@code control}. If a confirmation is required, nothing is sent; a pending confirmation is created instead.
+	 * Every outcome ends up in the audit log. No transaction here, so refusals are logged before the exception.
 	 */
-	public CommandStatus command(CurrentUser user, long id, Map<String, Object> command) {
-		var device = get(user, id);
-		CommandGuard.check(device, command);
+	public CommandOutcome command(CurrentUser user, Via via, long id, Map<String, Object> command) {
+		var device = get(id);
 		Action action = CommandGuard.permission(command);
-		switch (permissions.can(user, device, action)) {
-			case DENIED -> throw new CommandRefusedException(
-					"Not allowed to " + action.dbValue() + " " + device.getName());
+		Access access = permissions.accessOf(user);
+		if (!access.canView(device)) {
+			audit.record(user, via, device, action.dbValue(), command, AuditResult.DENIED, null);
+			throw notFound(id);
+		}
+		try {
+			CommandGuard.check(device, command);
+		}
+		catch (CommandRefusedException e) {
+			audit.record(user, via, device, action.dbValue(), command, AuditResult.LOCKED, null);
+			throw e;
+		}
+		switch (access.can(device, action)) {
+			case DENIED -> {
+				audit.record(user, via, device, action.dbValue(), command, AuditResult.DENIED, null);
+				throw new CommandRefusedException("Not allowed to " + action.dbValue() + " " + device.getName());
+			}
 			case NEEDS_CONFIRMATION -> {
-				return CommandStatus.CONFIRMATION_REQUIRED;
+				var confirmation = confirmations.request(user, via, device, action, command);
+				return new CommandOutcome(CommandStatus.CONFIRMATION_REQUIRED, confirmation);
 			}
 			case ALLOWED -> {
 			}
 		}
-		send(device, command);
-		return CommandStatus.SENT;
-	}
-
-	void send(Device device, Map<String, Object> command) {
-		adapter(device.getAdapter()).send(device.getExternalId(), command);
+		sender.send(device, command);
+		audit.record(user, via, device, action.dbValue(), command, AuditResult.SENT, null);
+		return new CommandOutcome(CommandStatus.SENT, null);
 	}
 
 	@EventListener
@@ -194,14 +217,6 @@ public class DeviceService {
 		catch (DataIntegrityViolationException e) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Room does not exist");
 		}
-	}
-
-	private DeviceAdapter adapter(String name) {
-		var adapter = adapters.get(name);
-		if (adapter == null) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown adapter " + name);
-		}
-		return adapter;
 	}
 
 }

@@ -7,7 +7,7 @@ import static org.awaitility.Awaitility.await;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.eclipse.paho.client.mqttv3.MqttClient;
@@ -21,8 +21,9 @@ import org.springframework.context.annotation.Import;
 import org.testcontainers.containers.GenericContainer;
 
 import dev.homeserver.smarthome.TestcontainersConfiguration;
+import dev.homeserver.smarthome.audit.Via;
 import dev.homeserver.smarthome.user.CurrentUser;
-import dev.homeserver.smarthome.user.Role;
+import dev.homeserver.smarthome.user.UserService;
 
 /** Plays Zigbee2MQTT against a real Mosquitto and checks the whole path through the backend. */
 @Import(TestcontainersConfiguration.class)
@@ -40,8 +41,6 @@ class DeviceFlowTest {
 			]
 			""";
 
-	private static final CurrentUser ADMIN = new CurrentUser(0, null, "Admin", null, Set.of(Role.ADMIN));
-
 	@Autowired
 	DeviceService service;
 
@@ -51,8 +50,15 @@ class DeviceFlowTest {
 	MqttClient zigbee2mqtt;
 	Map<String, String> received = new ConcurrentHashMap<>();
 
+	@Autowired
+	UserService users;
+
+	/** The initial admin from the test configuration, signed in like through a Kratos JWT. */
+	CurrentUser admin;
+
 	@BeforeEach
 	void connectFakeZigbee2mqtt() throws Exception {
+		admin = users.signIn(UUID.randomUUID(), "Admin", "admin@example.com", "admin");
 		zigbee2mqtt = new MqttClient(TestcontainersConfiguration.mqttUrl(mosquittoContainer), "fake-z2m",
 				new MemoryPersistence());
 		zigbee2mqtt.connect();
@@ -94,13 +100,13 @@ class DeviceFlowTest {
 						.containsEntry("brightness", 10));
 
 		// Commands go out on the /set topic
-		service.command(ADMIN, device.getId(), Map.of("brightness", 200));
+		service.command(admin, Via.APP, device.getId(), Map.of("brightness", 200));
 		await().atMost(Duration.ofSeconds(10))
 				.untilAsserted(() -> assertThat(received.get("zigbee2mqtt/Test Lampe/set")).isEqualTo("{\"brightness\":200}"));
 
 		// Locked actions are refused before anything is sent
-		service.update(ADMIN, device.getId(), null, false, null, List.of("switch_off"));
-		assertThatThrownBy(() -> service.command(ADMIN, device.getId(), Map.of("state", "OFF")))
+		service.update(admin, device.getId(), null, false, null, List.of("switch_off"));
+		assertThatThrownBy(() -> service.command(admin, Via.APP, device.getId(), Map.of("state", "OFF")))
 				.isInstanceOf(CommandRefusedException.class);
 	}
 

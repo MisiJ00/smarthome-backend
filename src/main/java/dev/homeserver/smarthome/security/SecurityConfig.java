@@ -27,7 +27,8 @@ public class SecurityConfig {
 	// Every request carries a bearer token, no sessions: a Kratos JWT (people) or an API token (machines).
 	// Only health and API docs are public. Everyone signed in can read rooms, only admins change them.
 	// The device API is open to everyone signed in; what they see and may do is decided by can() in DeviceService.
-	// Discovering, adding and removing devices is admin only, as is managing users, roles, grants and tokens.
+	// Discovering, adding and removing devices is admin only, as is managing users, roles, grants and tokens and the
+	// audit log. Confirmations are open to everyone signed in; ConfirmationService decides who sees and decides them.
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http, JwtDecoder jwtDecoder,
 			Converter<Jwt, AbstractAuthenticationToken> kratosJwtConverter, ApiTokenService apiTokens) throws Exception {
@@ -46,7 +47,7 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.DELETE, "/api/devices/*").hasRole(Role.ADMIN)
 						.requestMatchers("/api/devices", "/api/devices/**").authenticated()
 						.requestMatchers("/api/tokens/**", "/api/users", "/api/users/**", "/api/roles", "/api/roles/**",
-								"/api/grants", "/api/grants/**").hasRole(Role.ADMIN)
+								"/api/grants", "/api/grants/**", "/api/audit", "/api/audit/**").hasRole(Role.ADMIN)
 						.anyRequest().authenticated())
 				.oauth2ResourceServer(oauth2 -> oauth2.authenticationManagerResolver(request -> bearerTokens))
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
