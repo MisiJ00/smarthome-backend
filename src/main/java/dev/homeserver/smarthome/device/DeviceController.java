@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -17,39 +18,55 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import dev.homeserver.smarthome.device.DeviceService.CommandStatus;
+import dev.homeserver.smarthome.grant.Action;
+import dev.homeserver.smarthome.grant.PermissionService;
+import dev.homeserver.smarthome.grant.PermissionService.Access;
+import dev.homeserver.smarthome.user.CurrentUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 
+/**
+ * Devices. Everyone signed in sees the devices they may view, with what they may do with each one. Discovering, adding
+ * and removing devices and locking actions is admin only.
+ */
 @RestController
 @RequestMapping("/api/devices")
 public class DeviceController {
 
 	private final DeviceService service;
+	private final PermissionService permissions;
 
-	public DeviceController(DeviceService service) {
+	public DeviceController(DeviceService service, PermissionService permissions) {
 		this.service = service;
+		this.permissions = permissions;
 	}
 
-	/** All devices, or with {@code roomId} only those in one room ({@code roomId=none}: devices without a room). */
+	/**
+	 * Devices the caller may view; with {@code roomId} only those in one room ({@code roomId=none}: devices without a
+	 * room).
+	 */
 	@GetMapping
-	public List<DeviceResponse> list(@RequestParam(required = false) String roomId) {
+	public List<DeviceResponse> list(@AuthenticationPrincipal CurrentUser me,
+			@RequestParam(required = false) String roomId) {
 		List<Device> devices;
 		if (roomId == null) {
-			devices = service.list();
+			devices = service.list(me);
 		}
 		else if (roomId.equals("none")) {
-			devices = service.listWithoutRoom();
+			devices = service.listWithoutRoom(me);
 		}
 		else {
 			try {
-				devices = service.listInRoom(Long.parseLong(roomId));
+				devices = service.listInRoom(me, Long.parseLong(roomId));
 			}
 			catch (NumberFormatException e) {
 				throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "roomId must be a room id or \"none\"");
 			}
 		}
-		return devices.stream().map(DeviceResponse::from).toList();
+		Access access = permissions.accessOf(me);
+		return devices.stream().map(d -> DeviceResponse.from(d, access)).toList();
 	}
 
 	/** Devices the adapters can see but that have not been added yet. */
@@ -58,21 +75,25 @@ public class DeviceController {
 		return service.discovered();
 	}
 
+	/** 404 also for devices the caller may not view. */
 	@GetMapping("/{id}")
-	public DeviceResponse get(@PathVariable long id) {
-		return DeviceResponse.from(service.get(id));
+	public DeviceResponse get(@AuthenticationPrincipal CurrentUser me, @PathVariable long id) {
+		return DeviceResponse.from(service.get(me, id), permissions.accessOf(me));
 	}
 
 	@PostMapping
 	@ResponseStatus(HttpStatus.CREATED)
-	public DeviceResponse add(@Valid @RequestBody AddDeviceRequest request) {
-		return DeviceResponse.from(service.add(request.adapter(), request.externalId(), request.name(), request.roomId()));
+	public DeviceResponse add(@AuthenticationPrincipal CurrentUser me, @Valid @RequestBody AddDeviceRequest request) {
+		return DeviceResponse.from(service.add(request.adapter(), request.externalId(), request.name(), request.roomId()),
+				permissions.accessOf(me));
 	}
 
+	/** Name and room need {@code configure}, locked actions are admin only. */
 	@PatchMapping("/{id}")
-	public DeviceResponse update(@PathVariable long id, @RequestBody UpdateDeviceRequest request) {
-		return DeviceResponse.from(service.update(id, request.getName(), request.isRoomIdSet(), request.getRoomId(),
-				request.getLockedActions()));
+	public DeviceResponse update(@AuthenticationPrincipal CurrentUser me, @PathVariable long id,
+			@RequestBody UpdateDeviceRequest request) {
+		return DeviceResponse.from(service.update(me, id, request.getName(), request.isRoomIdSet(), request.getRoomId(),
+				request.getLockedActions()), permissions.accessOf(me));
 	}
 
 	@DeleteMapping("/{id}")
@@ -82,13 +103,22 @@ public class DeviceController {
 	}
 
 	/**
-	 * Sends a command, e.g. {@code {"state": "ON", "brightness": 120}}. The new state arrives
-	 * asynchronously once the device reports it.
+	 * Sends a command, e.g. {@code {"state": "ON", "brightness": 120}}. The new state arrives asynchronously once the
+	 * device reports it. 403 if the action is locked for the device or the caller lacks {@code control} (or
+	 * {@code unlock}). If a confirmation is required, nothing is sent ({@code status: confirmation_required}).
 	 */
 	@PostMapping("/{id}/commands")
 	@ResponseStatus(HttpStatus.ACCEPTED)
-	public void command(@PathVariable long id, @RequestBody @NotEmpty Map<String, Object> command) {
-		service.command(id, command);
+	public CommandResponse command(@AuthenticationPrincipal CurrentUser me, @PathVariable long id,
+			@RequestBody @NotEmpty Map<String, Object> command) {
+		return new CommandResponse(service.command(me, id, command));
+	}
+
+	public record CommandResponse(CommandStatus status) {
+	}
+
+	/** What the caller may do with a device. */
+	public record DevicePermission(Action action, boolean requiresConfirmation) {
 	}
 
 	public record DeviceResponse(
@@ -101,11 +131,16 @@ public class DeviceController {
 			Map<String, Object> capabilities,
 			Map<String, Object> state,
 			Instant lastSeen,
-			List<String> lockedActions) {
+			List<String> lockedActions,
+			List<DevicePermission> permissions) {
 
-		static DeviceResponse from(Device d) {
+		static DeviceResponse from(Device d, Access access) {
+			var permissions = access.permissions(d).stream()
+					.map(p -> new DevicePermission(p.action(), p.requiresConfirmation()))
+					.toList();
 			return new DeviceResponse(d.getId(), d.getName(), d.getRoomId(), d.getType(), d.getAdapter(),
-					d.getExternalId(), d.getCapabilities(), d.getState(), d.getLastSeen(), d.getLockedActions());
+					d.getExternalId(), d.getCapabilities(), d.getState(), d.getLastSeen(), d.getLockedActions(),
+					permissions);
 		}
 
 	}

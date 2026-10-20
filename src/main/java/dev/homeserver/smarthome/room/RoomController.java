@@ -23,7 +23,9 @@ import dev.homeserver.smarthome.user.CurrentUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 
-/** Rooms: everyone signed in can read them, only admins change them. */
+/**
+ * Rooms: everyone signed in reads them (non-admins only rooms with devices they may view), only admins change them.
+ */
 @RestController
 @RequestMapping("/api/rooms")
 public class RoomController {
@@ -34,15 +36,16 @@ public class RoomController {
 		this.service = service;
 	}
 
-	/** Sorted by {@code sort}, then name. */
+	/** Sorted by {@code sort}, then name. {@code deviceCount} counts the devices the caller may view. */
 	@GetMapping
 	public List<RoomResponse> list(@AuthenticationPrincipal CurrentUser me) {
 		return service.list(me).stream().map(RoomResponse::from).toList();
 	}
 
+	/** 404 for rooms the caller does not see in the list. */
 	@GetMapping("/{id}")
-	public RoomResponse get(@PathVariable long id) {
-		return RoomResponse.from(service.get(id));
+	public RoomResponse get(@AuthenticationPrincipal CurrentUser me, @PathVariable long id) {
+		return RoomResponse.from(service.get(me, id));
 	}
 
 	/** Name is trimmed and has to be unique regardless of case (409 otherwise). New rooms go to the end. */

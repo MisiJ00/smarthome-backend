@@ -85,11 +85,16 @@ class RoomApiTest {
 	@Test
 	void residentsAndAiReadButCannotChangeRooms() throws Exception {
 		long id = createRoom(unique("Bad"), null);
+		moveDevice(addDevice("Badlicht"), String.valueOf(id)).andExpect(status().isOk());
 		String ai = aiToken();
+
+		// The AI may view all devices, so it sees the room; the resident has no roles and sees nothing
+		as(ai, get("/api/rooms/" + id)).andExpect(status().isOk()).andExpect(jsonPath("$.deviceCount").value(1));
+		as(RESIDENT, get("/api/rooms/" + id)).andExpect(status().isNotFound());
+		as(RESIDENT, get("/api/rooms")).andExpect(jsonPath("$[*].id", not(hasItem((int) id))));
 
 		for (String bearer : List.of(RESIDENT, ai)) {
 			as(bearer, get("/api/rooms")).andExpect(status().isOk());
-			as(bearer, get("/api/rooms/" + id)).andExpect(status().isOk());
 			as(bearer, post("/api/rooms").contentType(MediaType.APPLICATION_JSON).content("{\"name\": \"Keller\"}"))
 					.andExpect(status().isForbidden());
 			as(bearer, patch("/api/rooms/" + id).contentType(MediaType.APPLICATION_JSON).content("{\"name\": \"Keller\"}"))
@@ -197,10 +202,10 @@ class RoomApiTest {
 				.andExpect(jsonPath("$.roomId").doesNotExist());
 		as(ADMIN, get("/api/devices").param("roomId", "none")).andExpect(jsonPath("$[*].id", hasItem((int) lamp)));
 
-		// Moving devices is admin only for now
+		// Without any permission the device does not exist for a resident
 		as(RESIDENT, patch("/api/devices/" + lamp).contentType(MediaType.APPLICATION_JSON)
 				.content("{\"roomId\": " + room + "}"))
-				.andExpect(status().isForbidden());
+				.andExpect(status().isNotFound());
 	}
 
 	private long createRoom(String name, String icon) throws Exception {

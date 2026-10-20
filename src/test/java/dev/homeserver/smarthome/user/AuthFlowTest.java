@@ -78,8 +78,12 @@ class AuthFlowTest {
 				.andExpect(jsonPath("$.id").value(id))
 				.andExpect(jsonPath("$.name").value("Erika M."));
 
-		// Without the admin role the device API is closed for now
-		as(TestJwts.token(identity, "bewohner@example.com", "Erika"), get("/api/devices")).andExpect(status().isForbidden());
+		// Without roles or grants there is nothing to see, and the admin parts stay closed
+		as(TestJwts.token(identity, "bewohner@example.com", "Erika"), get("/api/devices"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", empty()));
+		as(TestJwts.token(identity, "bewohner@example.com", "Erika"), get("/api/devices/discovered"))
+				.andExpect(status().isForbidden());
 	}
 
 	@Test

@@ -11,8 +11,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import dev.homeserver.smarthome.device.Device;
 import dev.homeserver.smarthome.device.DeviceRepository;
 import dev.homeserver.smarthome.device.DeviceRepository.RoomDeviceCount;
+import dev.homeserver.smarthome.grant.PermissionService;
+import dev.homeserver.smarthome.grant.PermissionService.Access;
 import dev.homeserver.smarthome.user.CurrentUser;
 
 @Service
@@ -23,31 +26,53 @@ public class RoomService {
 
 	private final RoomRepository rooms;
 	private final DeviceRepository devices;
+	private final PermissionService permissions;
 
-	public RoomService(RoomRepository rooms, DeviceRepository devices) {
+	public RoomService(RoomRepository rooms, DeviceRepository devices, PermissionService permissions) {
 		this.rooms = rooms;
 		this.devices = devices;
+		this.permissions = permissions;
 	}
 
 	public record RoomWithCount(Room room, long deviceCount) {
 	}
 
 	/**
-	 * All rooms in display order with their number of devices. Takes the caller so that rooms can be filtered by
-	 * permissions once {@code can()} exists; until then everyone signed in sees all rooms.
+	 * Rooms in display order with their number of devices. Admins see all rooms and all devices; everyone else only
+	 * rooms with at least one device they may view, and only those devices are counted.
 	 */
 	@Transactional(readOnly = true)
 	public List<RoomWithCount> list(CurrentUser user) {
-		Map<Long, Long> counts = devices.countPerRoom().stream()
-				.collect(Collectors.toMap(RoomDeviceCount::roomId, RoomDeviceCount::deviceCount));
+		Access access = permissions.accessOf(user);
+		Map<Long, Long> counts = access.isAdmin()
+				? devices.countPerRoom().stream()
+						.collect(Collectors.toMap(RoomDeviceCount::roomId, RoomDeviceCount::deviceCount))
+				: visibleCounts(access);
 		return rooms.findAllByOrderBySortAscNameAsc().stream()
 				.map(room -> new RoomWithCount(room, counts.getOrDefault(room.getId(), 0L)))
+				.filter(r -> access.isAdmin() || r.deviceCount() > 0)
 				.toList();
 	}
 
+	/** 404 for rooms the user does not see in the list. */
 	@Transactional(readOnly = true)
-	public RoomWithCount get(long id) {
-		return new RoomWithCount(find(id), devices.countByRoomId(id));
+	public RoomWithCount get(CurrentUser user, long id) {
+		Room room = find(id);
+		Access access = permissions.accessOf(user);
+		if (access.isAdmin()) {
+			return new RoomWithCount(room, devices.countByRoomId(id));
+		}
+		long visible = devices.findByRoomId(id).stream().filter(access::canView).count();
+		if (visible == 0) {
+			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No room with id " + id);
+		}
+		return new RoomWithCount(room, visible);
+	}
+
+	private Map<Long, Long> visibleCounts(Access access) {
+		return devices.findAll().stream()
+				.filter(d -> d.getRoomId() != null && access.canView(d))
+				.collect(Collectors.groupingBy(Device::getRoomId, Collectors.counting()));
 	}
 
 	/** New rooms go to the end of the list. */

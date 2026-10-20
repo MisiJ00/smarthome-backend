@@ -9,6 +9,8 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
+import dev.homeserver.smarthome.grant.Action;
+
 class CommandGuardTest {
 
 	@Test
@@ -30,12 +32,17 @@ class CommandGuardTest {
 	}
 
 	@Test
-	void refusesUnlockUntilConfirmationsExist() {
+	void unlockingNeedsTheUnlockPermissionEverythingElseControl() {
 		var lock = device("lock", List.of());
 
-		assertThatThrownBy(() -> CommandGuard.check(lock, Map.of("state", "UNLOCK")))
+		assertThatCode(() -> CommandGuard.check(lock, Map.of("state", "UNLOCK"))).doesNotThrowAnyException();
+		assertThat(CommandGuard.permission(Map.of("state", "unlock"))).isEqualTo(Action.UNLOCK);
+		assertThat(CommandGuard.permission(Map.of("state", "LOCK"))).isEqualTo(Action.CONTROL);
+		assertThat(CommandGuard.permission(Map.of("brightness", 10))).isEqualTo(Action.CONTROL);
+
+		var lockedLock = device("lock", List.of("unlock"));
+		assertThatThrownBy(() -> CommandGuard.check(lockedLock, Map.of("state", "UNLOCK")))
 				.isInstanceOf(CommandRefusedException.class);
-		assertThatCode(() -> CommandGuard.check(lock, Map.of("state", "LOCK"))).doesNotThrowAnyException();
 	}
 
 	private static Device device(String type, List<String> lockedActions) {

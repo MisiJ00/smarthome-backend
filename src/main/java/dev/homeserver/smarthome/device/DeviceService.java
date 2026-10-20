@@ -13,43 +13,77 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import dev.homeserver.smarthome.room.RoomRepository;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
+import dev.homeserver.smarthome.grant.Action;
+import dev.homeserver.smarthome.grant.PermissionService;
+import dev.homeserver.smarthome.grant.PermissionService.Access;
+import dev.homeserver.smarthome.grant.PermissionService.Decision;
+import dev.homeserver.smarthome.room.RoomRepository;
+import dev.homeserver.smarthome.user.CurrentUser;
+
+/**
+ * Devices as a user sees them: lists only contain devices the user may view, devices the user may not view do not
+ * exist for them (404). Adding, removing and locking actions is for admins (checked in the security config).
+ */
 @Service
 public class DeviceService {
 
 	private final DeviceRepository devices;
 	private final RoomRepository rooms;
+	private final PermissionService permissions;
 	private final Map<String, DeviceAdapter> adapters;
 
-	public DeviceService(DeviceRepository devices, RoomRepository rooms, List<DeviceAdapter> adapters) {
+	public DeviceService(DeviceRepository devices, RoomRepository rooms, PermissionService permissions,
+			List<DeviceAdapter> adapters) {
 		this.devices = devices;
 		this.rooms = rooms;
+		this.permissions = permissions;
 		this.adapters = adapters.stream().collect(Collectors.toMap(DeviceAdapter::name, Function.identity()));
 	}
 
-	@Transactional(readOnly = true)
-	public List<Device> list() {
-		return devices.findAll();
+	/** What a command led to: sent to the device, or waiting for a confirmation. */
+	public enum CommandStatus {
+
+		@JsonProperty("sent")
+		SENT,
+
+		@JsonProperty("confirmation_required")
+		CONFIRMATION_REQUIRED
+
 	}
 
 	@Transactional(readOnly = true)
-	public List<Device> listInRoom(long roomId) {
+	public List<Device> list(CurrentUser user) {
+		return visible(user, devices.findAll());
+	}
+
+	@Transactional(readOnly = true)
+	public List<Device> listInRoom(CurrentUser user, long roomId) {
 		if (!rooms.existsById(roomId)) {
 			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No room with id " + roomId);
 		}
-		return devices.findByRoomId(roomId);
+		return visible(user, devices.findByRoomId(roomId));
 	}
 
 	@Transactional(readOnly = true)
-	public List<Device> listWithoutRoom() {
-		return devices.findByRoomIdIsNull();
+	public List<Device> listWithoutRoom(CurrentUser user) {
+		return visible(user, devices.findByRoomIdIsNull());
+	}
+
+	/** The device if the user may view it, otherwise 404. */
+	@Transactional(readOnly = true)
+	public Device get(CurrentUser user, long id) {
+		var device = get(id);
+		if (!permissions.accessOf(user).canView(device)) {
+			throw notFound(id);
+		}
+		return device;
 	}
 
 	@Transactional(readOnly = true)
 	public Device get(long id) {
-		return devices.findById(id)
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No device with id " + id));
+		return devices.findById(id).orElseThrow(() -> notFound(id));
 	}
 
 	/** Devices the adapters can see that have not been added yet. */
@@ -77,10 +111,21 @@ public class DeviceService {
 		return save(new Device(discovered, name, roomId));
 	}
 
-	/** Null fields stay unchanged. With {@code setRoom} the device moves to {@code roomId}, null meaning no room. */
+	/**
+	 * Null fields stay unchanged. With {@code setRoom} the device moves to {@code roomId}, null meaning no room. Name and
+	 * room need {@code configure}, locked actions can only be changed by admins.
+	 */
 	@Transactional
-	public Device update(long id, String name, boolean setRoom, Long roomId, List<String> lockedActions) {
-		var device = get(id);
+	public Device update(CurrentUser user, long id, String name, boolean setRoom, Long roomId,
+			List<String> lockedActions) {
+		var device = get(user, id);
+		var access = permissions.accessOf(user);
+		if ((name != null || setRoom) && access.can(device, Action.CONFIGURE) != Decision.ALLOWED) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to configure " + device.getName());
+		}
+		if (lockedActions != null && !access.isAdmin()) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only admins can lock actions");
+		}
 		if (name != null) {
 			device.setName(name);
 		}
@@ -101,9 +146,28 @@ public class DeviceService {
 		devices.delete(get(id));
 	}
 
-	public void command(long id, Map<String, Object> command) {
-		var device = get(id);
+	/**
+	 * Locked actions are refused for everyone (403). Then {@code can()}: unlocking needs {@code unlock}, everything
+	 * else {@code control}. If a confirmation is required, nothing is sent yet.
+	 */
+	public CommandStatus command(CurrentUser user, long id, Map<String, Object> command) {
+		var device = get(user, id);
 		CommandGuard.check(device, command);
+		Action action = CommandGuard.permission(command);
+		switch (permissions.can(user, device, action)) {
+			case DENIED -> throw new CommandRefusedException(
+					"Not allowed to " + action.dbValue() + " " + device.getName());
+			case NEEDS_CONFIRMATION -> {
+				return CommandStatus.CONFIRMATION_REQUIRED;
+			}
+			case ALLOWED -> {
+			}
+		}
+		send(device, command);
+		return CommandStatus.SENT;
+	}
+
+	void send(Device device, Map<String, Object> command) {
 		adapter(device.getAdapter()).send(device.getExternalId(), command);
 	}
 
@@ -112,6 +176,15 @@ public class DeviceService {
 	public void onStateChanged(DeviceStateChanged event) {
 		devices.findByAdapterAndExternalId(event.adapter(), event.externalId())
 				.ifPresent(device -> device.mergeState(event.state(), Instant.now()));
+	}
+
+	private List<Device> visible(CurrentUser user, List<Device> candidates) {
+		Access access = permissions.accessOf(user);
+		return candidates.stream().filter(access::canView).toList();
+	}
+
+	private static ResponseStatusException notFound(long id) {
+		return new ResponseStatusException(HttpStatus.NOT_FOUND, "No device with id " + id);
 	}
 
 	private Device save(Device device) {

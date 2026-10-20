@@ -7,6 +7,7 @@ import static org.awaitility.Awaitility.await;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.eclipse.paho.client.mqttv3.MqttClient;
@@ -20,6 +21,8 @@ import org.springframework.context.annotation.Import;
 import org.testcontainers.containers.GenericContainer;
 
 import dev.homeserver.smarthome.TestcontainersConfiguration;
+import dev.homeserver.smarthome.user.CurrentUser;
+import dev.homeserver.smarthome.user.Role;
 
 /** Plays Zigbee2MQTT against a real Mosquitto and checks the whole path through the backend. */
 @Import(TestcontainersConfiguration.class)
@@ -36,6 +39,8 @@ class DeviceFlowTest {
 			       {"type": "numeric", "name": "brightness", "property": "brightness", "access": 7}]}]}}
 			]
 			""";
+
+	private static final CurrentUser ADMIN = new CurrentUser(0, null, "Admin", null, Set.of(Role.ADMIN));
 
 	@Autowired
 	DeviceService service;
@@ -89,13 +94,13 @@ class DeviceFlowTest {
 						.containsEntry("brightness", 10));
 
 		// Commands go out on the /set topic
-		service.command(device.getId(), Map.of("brightness", 200));
+		service.command(ADMIN, device.getId(), Map.of("brightness", 200));
 		await().atMost(Duration.ofSeconds(10))
 				.untilAsserted(() -> assertThat(received.get("zigbee2mqtt/Test Lampe/set")).isEqualTo("{\"brightness\":200}"));
 
 		// Locked actions are refused before anything is sent
-		service.update(device.getId(), null, false, null, List.of("switch_off"));
-		assertThatThrownBy(() -> service.command(device.getId(), Map.of("state", "OFF")))
+		service.update(ADMIN, device.getId(), null, false, null, List.of("switch_off"));
+		assertThatThrownBy(() -> service.command(ADMIN, device.getId(), Map.of("state", "OFF")))
 				.isInstanceOf(CommandRefusedException.class);
 	}
 

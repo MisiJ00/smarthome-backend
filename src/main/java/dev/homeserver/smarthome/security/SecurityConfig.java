@@ -26,7 +26,8 @@ public class SecurityConfig {
 
 	// Every request carries a bearer token, no sessions: a Kratos JWT (people) or an API token (machines).
 	// Only health and API docs are public. Everyone signed in can read rooms, only admins change them.
-	// Until grants and can() exist, the device API is admin only.
+	// The device API is open to everyone signed in; what they see and may do is decided by can() in DeviceService.
+	// Discovering, adding and removing devices is admin only, as is managing users, roles, grants and tokens.
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http, JwtDecoder jwtDecoder,
 			Converter<Jwt, AbstractAuthenticationToken> kratosJwtConverter, ApiTokenService apiTokens) throws Exception {
@@ -40,8 +41,12 @@ public class SecurityConfig {
 						.requestMatchers("/api/me").authenticated()
 						.requestMatchers(HttpMethod.GET, "/api/rooms", "/api/rooms/**").authenticated()
 						.requestMatchers("/api/rooms", "/api/rooms/**").hasRole(Role.ADMIN)
-						.requestMatchers("/api/devices/**", "/api/tokens/**", "/api/users", "/api/users/**", "/api/roles",
-								"/api/roles/**", "/api/grants", "/api/grants/**").hasRole(Role.ADMIN)
+						.requestMatchers("/api/devices/discovered").hasRole(Role.ADMIN)
+						.requestMatchers(HttpMethod.POST, "/api/devices").hasRole(Role.ADMIN)
+						.requestMatchers(HttpMethod.DELETE, "/api/devices/*").hasRole(Role.ADMIN)
+						.requestMatchers("/api/devices", "/api/devices/**").authenticated()
+						.requestMatchers("/api/tokens/**", "/api/users", "/api/users/**", "/api/roles", "/api/roles/**",
+								"/api/grants", "/api/grants/**").hasRole(Role.ADMIN)
 						.anyRequest().authenticated())
 				.oauth2ResourceServer(oauth2 -> oauth2.authenticationManagerResolver(request -> bearerTokens))
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

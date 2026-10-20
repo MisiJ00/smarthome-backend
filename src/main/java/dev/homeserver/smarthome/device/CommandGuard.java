@@ -5,14 +5,17 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import dev.homeserver.smarthome.grant.Action;
+
 /**
  * Safety rules that apply to every command, no matter who sends it.
  *
  * <p>A command is translated into action names (e.g. {@code switch_off}, {@code unlock},
  * {@code set_brightness}). If one of them is in the device's {@code locked_actions}, the
- * command is refused. Unlocking is refused for now, until the confirmation flow exists.
+ * command is refused, for everyone including admins and the AI.
  *
- * <p>User and role permissions come later and will sit in front of this.
+ * <p>User and role permissions are checked after this ({@code PermissionService.can}); {@link #permission} says which
+ * permission a command needs.
  */
 public final class CommandGuard {
 
@@ -50,9 +53,11 @@ public final class CommandGuard {
 				throw new CommandRefusedException("'" + action + "' is locked for device " + device.getName());
 			}
 		}
-		if (actions.contains("unlock")) {
-			throw new CommandRefusedException("Unlocking needs a confirmation, which is not implemented yet");
-		}
+	}
+
+	/** Unlocking needs the {@code unlock} permission, every other command {@code control}. */
+	public static Action permission(Map<String, Object> command) {
+		return actions(command).contains("unlock") ? Action.UNLOCK : Action.CONTROL;
 	}
 
 }

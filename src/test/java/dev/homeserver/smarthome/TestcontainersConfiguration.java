@@ -31,6 +31,11 @@ public class TestcontainersConfiguration {
 		return registry -> registry.add("smarthome.mqtt.url", () -> mqttUrl(mosquittoContainer));
 	}
 
+	@Bean
+	RecordingDeviceAdapter recordingDeviceAdapter() {
+		return new RecordingDeviceAdapter();
+	}
+
 	/** Real Kratos, in memory, for the admin API (accounts, setup codes) and to redeem setup codes like the app. */
 	@Bean
 	GenericContainer<?> kratosContainer() {

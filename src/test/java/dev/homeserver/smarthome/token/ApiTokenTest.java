@@ -66,7 +66,8 @@ class ApiTokenTest {
 				.andExpect(jsonPath("$.roles", contains("ki")));
 
 		// The AI is not an admin
-		as(secret, get("/api/devices")).andExpect(status().isForbidden());
+		as(secret, get("/api/devices")).andExpect(status().isOk());
+		as(secret, get("/api/devices/discovered")).andExpect(status().isForbidden());
 		as(secret, get("/api/tokens")).andExpect(status().isForbidden());
 
 		// The list never contains the secret, but shows when the token was last used
