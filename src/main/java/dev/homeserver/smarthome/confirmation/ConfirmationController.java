@@ -4,7 +4,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,9 +13,9 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import dev.homeserver.smarthome.audit.Via;
+import dev.homeserver.smarthome.error.ApiException;
 import dev.homeserver.smarthome.confirmation.ConfirmationService.Challenge;
 import dev.homeserver.smarthome.confirmation.ConfirmationService.SignedApproval;
 import dev.homeserver.smarthome.grant.Action;
@@ -104,8 +103,8 @@ public class ConfirmationController {
 			return ConfirmationStatus.valueOf(status.strip().toUpperCase());
 		}
 		catch (IllegalArgumentException e) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"status must be pending, approved, rejected, expired or all");
+			throw ApiException.badRequest("confirmation.status_invalid",
+					"status muss pending, approved, rejected, expired oder all sein.");
 		}
 	}
 

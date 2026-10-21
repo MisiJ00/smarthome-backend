@@ -14,12 +14,14 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationProvider;
 import org.springframework.security.web.SecurityFilterChain;
 
+import dev.homeserver.smarthome.error.SecurityProblems;
 import dev.homeserver.smarthome.token.ApiTokenService;
 import dev.homeserver.smarthome.user.Role;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
+import tools.jackson.databind.json.JsonMapper;
 
 @Configuration
 public class SecurityConfig {
@@ -31,7 +33,9 @@ public class SecurityConfig {
 	// audit log. Confirmations are open to everyone signed in; ConfirmationService decides who sees and decides them.
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http, JwtDecoder jwtDecoder,
-			Converter<Jwt, AbstractAuthenticationToken> kratosJwtConverter, ApiTokenService apiTokens) throws Exception {
+			Converter<Jwt, AbstractAuthenticationToken> kratosJwtConverter, ApiTokenService apiTokens, JsonMapper json)
+			throws Exception {
+		var problems = new SecurityProblems(json);
 		var jwtProvider = new JwtAuthenticationProvider(jwtDecoder);
 		jwtProvider.setJwtAuthenticationConverter(kratosJwtConverter);
 		AuthenticationManager bearerTokens = new ProviderManager(new ApiTokenAuthenticationProvider(apiTokens), jwtProvider);
@@ -51,7 +55,11 @@ public class SecurityConfig {
 						.requestMatchers("/api/tokens/**", "/api/users", "/api/users/**", "/api/roles", "/api/roles/**",
 								"/api/grants", "/api/grants/**", "/api/audit", "/api/audit/**", "/api/adapters/**").hasRole(Role.ADMIN)
 						.anyRequest().authenticated())
-				.oauth2ResourceServer(oauth2 -> oauth2.authenticationManagerResolver(request -> bearerTokens))
+				.oauth2ResourceServer(oauth2 -> oauth2.authenticationManagerResolver(request -> bearerTokens)
+						.authenticationEntryPoint(problems)
+						.accessDeniedHandler(problems))
+				// 401 and 403 as problem details like every other error
+				.exceptionHandling(errors -> errors.authenticationEntryPoint(problems).accessDeniedHandler(problems))
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				// No cookies are used, so CSRF protection is not needed
 				.csrf(csrf -> csrf.disable())

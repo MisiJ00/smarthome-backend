@@ -4,13 +4,12 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import dev.homeserver.smarthome.trusteddevice.TrustedDeviceProperties;
+import dev.homeserver.smarthome.error.ApiException;
 
 /** Hands out challenges and uses them up. */
 @Component
@@ -42,19 +41,20 @@ public class ChallengeStore {
 	public ConfirmationChallenge consume(long confirmationId, long userId, String nonce) {
 		var challenge = challenges.findForUpdate(nonce == null ? "" : nonce)
 				.filter(c -> c.getConfirmationId() == confirmationId && c.getUserId() == userId)
-				.orElseThrow(() -> invalid("Unknown challenge"));
+				.orElseThrow(() -> invalid("challenge.unknown",
+						"Diese Freigabe-Anfrage ist unbekannt. Bitte noch einmal freigeben."));
 		if (challenge.getUsedAt() != null) {
-			throw invalid("Challenge has already been used");
+			throw invalid("challenge.used", "Diese Freigabe-Anfrage wurde schon benutzt. Bitte noch einmal freigeben.");
 		}
 		challenge.use();
 		if (!challenge.getExpiresAt().isAfter(Instant.now())) {
-			throw invalid("Challenge has expired");
+			throw invalid("challenge.expired", "Die Freigabe-Anfrage ist abgelaufen. Bitte noch einmal freigeben.");
 		}
 		return challenge;
 	}
 
-	private static ResponseStatusException invalid(String message) {
-		return new ResponseStatusException(HttpStatus.FORBIDDEN, message);
+	private static ApiException invalid(String code, String message) {
+		return ApiException.forbidden(code, message);
 	}
 
 }

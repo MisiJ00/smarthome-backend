@@ -50,9 +50,21 @@ public final class CommandGuard {
 		var actions = actions(command);
 		for (var action : actions) {
 			if (device.getLockedActions().contains(action)) {
-				throw new CommandRefusedException("'" + action + "' is locked for device " + device.getName());
+				throw new CommandRefusedException("device.action_locked",
+						"„" + actionName(action) + "“ ist bei " + device.getName() + " gesperrt.");
 			}
 		}
+	}
+
+	/** German name of an action for messages, e.g. {@code switch_off} → „Ausschalten“. */
+	public static String actionName(String action) {
+		return switch (action) {
+			case "switch_on" -> "Einschalten";
+			case "switch_off" -> "Ausschalten";
+			case "lock" -> "Abschließen";
+			case "unlock" -> "Aufschließen";
+			default -> action.replaceFirst("^set_", "").replace('_', ' ') + " setzen";
+		};
 	}
 
 	/** Unlocking needs the {@code unlock} permission, every other command {@code control}. */

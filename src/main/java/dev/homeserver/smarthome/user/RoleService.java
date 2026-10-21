@@ -5,10 +5,10 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
+
+import dev.homeserver.smarthome.error.ApiException;
 
 /** System roles (admin, bewohner, gast, ki) are fixed; admins can add and remove their own roles. */
 @Service
@@ -38,8 +38,8 @@ public class RoleService {
 	public Role create(String name) {
 		String trimmed = name == null ? "" : name.strip();
 		if (!NAME.matcher(trimmed).matches()) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"Role names have 2 to 32 characters: lower case letters, digits, - and _");
+			throw ApiException.badRequest("role.name_invalid",
+					"Rollennamen haben 2 bis 32 Zeichen: Kleinbuchstaben, Ziffern, Bindestrich, Unterstrich.");
 		}
 		if (roles.existsByName(trimmed)) {
 			throw nameTaken(trimmed);
@@ -56,22 +56,22 @@ public class RoleService {
 	@Transactional
 	public void delete(long id) {
 		Role role = roles.findById(id)
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No role with id " + id));
+				.orElseThrow(() -> ApiException.notFound("role.not_found", "Diese Rolle gibt es nicht."));
 		if (role.isSystem()) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "System role " + role.getName() + " cannot be deleted");
+			throw ApiException.conflict("role.system",
+					"Die Systemrolle „" + role.getName() + "“ kann nicht gelöscht werden.");
 		}
 		long members = roles.countMembers(id);
 		if (members > 0) {
-			var e = new ResponseStatusException(HttpStatus.CONFLICT,
-					"Role " + role.getName() + " still has " + members + " user(s)");
-			e.getBody().setProperty("userCount", members);
-			throw e;
+			throw ApiException.conflict("role.in_use", "Die Rolle „" + role.getName() + "“ hat noch " + members
+					+ " Benutzer. Bitte ihnen zuerst die Rolle entziehen.")
+					.with("userCount", members);
 		}
 		roles.delete(role);
 	}
 
-	private static ResponseStatusException nameTaken(String name) {
-		return new ResponseStatusException(HttpStatus.CONFLICT, "A role named " + name + " already exists");
+	private static ApiException nameTaken(String name) {
+		return ApiException.conflict("role.name_taken", "Eine Rolle „" + name + "“ gibt es schon.");
 	}
 
 }

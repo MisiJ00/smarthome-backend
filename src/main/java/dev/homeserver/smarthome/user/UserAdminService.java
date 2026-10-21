@@ -5,12 +5,11 @@ import java.util.List;
 import java.util.Set;
 
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import dev.homeserver.smarthome.events.LiveEvents.PermissionsChanged;
+import dev.homeserver.smarthome.error.ApiException;
 import dev.homeserver.smarthome.events.LiveEvents.UserAccessEnded;
 import dev.homeserver.smarthome.kratos.KratosAdminClient;
 import dev.homeserver.smarthome.kratos.KratosAdminClient.SetupCode;
@@ -49,7 +48,7 @@ public class UserAdminService {
 	@Transactional(readOnly = true)
 	public User get(long id) {
 		return users.findById(id)
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No user with id " + id));
+				.orElseThrow(() -> ApiException.notFound("user.not_found", "Diesen Benutzer gibt es nicht."));
 	}
 
 	/**
@@ -79,10 +78,10 @@ public class UserAdminService {
 	public SetupCode newSetupCode(long id) {
 		User user = get(id);
 		if (user.isMachine()) {
-			throw conflict("Machine users sign in with API tokens, not with a password");
+			throw conflict("user.machine_no_password", "Maschinen-User melden sich mit API-Tokens an, nicht mit Passwort.");
 		}
 		if (!user.isActive()) {
-			throw conflict("User " + id + " is deactivated");
+			throw conflict("user.deactivated", "Der Benutzer ist deaktiviert.");
 		}
 		return kratos.createSetupCode(user.getIdentityId());
 	}
@@ -126,7 +125,7 @@ public class UserAdminService {
 			ensureAnotherAdminRemains(user);
 		}
 		if (user.isMachine() && newRoles.stream().anyMatch(r -> r.getName().equals(Role.ADMIN))) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Machine users cannot be admins");
+			throw ApiException.badRequest("user.machine_admin", "Maschinen-User können keine Admins sein.");
 		}
 		user.getRoles().clear();
 		user.getRoles().addAll(newRoles);
@@ -139,7 +138,8 @@ public class UserAdminService {
 	public void delete(long id) {
 		User user = get(id);
 		if (user.isMachine()) {
-			throw conflict("Machine users cannot be deleted; revoke their tokens or deactivate them instead");
+			throw conflict("user.machine_delete",
+					"Maschinen-User können nicht gelöscht werden; stattdessen ihre Tokens widerrufen oder sie deaktivieren.");
 		}
 		ensureAnotherAdminRemains(user);
 		users.delete(user);
@@ -155,7 +155,7 @@ public class UserAdminService {
 		}
 		roles.lockAdminRole();
 		if (users.countActiveAdmins() <= 1) {
-			throw conflict("User " + user.getId() + " is the last active admin");
+			throw conflict("user.last_admin", user.getName() + " ist der letzte aktive Admin.");
 		}
 	}
 
@@ -163,7 +163,7 @@ public class UserAdminService {
 		Set<Role> result = new HashSet<>();
 		for (String name : names == null ? List.<String>of() : names) {
 			result.add(roles.findByName(name)
-					.orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "No role named " + name)));
+					.orElseThrow(() -> ApiException.badRequest("role.not_found", "Die Rolle „" + name + "“ gibt es nicht.")));
 		}
 		return result;
 	}
@@ -171,14 +171,13 @@ public class UserAdminService {
 	private static String validName(String name) {
 		String trimmed = name == null ? "" : name.strip();
 		if (trimmed.isEmpty() || trimmed.length() > MAX_NAME_LENGTH) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"name must have 1 to " + MAX_NAME_LENGTH + " characters");
+			throw ApiException.badRequest("user.name_invalid", "Der Name muss 1 bis " + MAX_NAME_LENGTH + " Zeichen haben.");
 		}
 		return trimmed;
 	}
 
-	private static ResponseStatusException conflict(String message) {
-		return new ResponseStatusException(HttpStatus.CONFLICT, message);
+	private static ApiException conflict(String code, String message) {
+		return ApiException.conflict(code, message);
 	}
 
 }

@@ -5,9 +5,9 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
-import org.springframework.web.server.ResponseStatusException;
+
+import dev.homeserver.smarthome.error.ApiException;
 
 /**
  * Hands a command to the device's adapter. No checks here: callers ({@code DeviceService}, approved confirmations)
@@ -29,7 +29,7 @@ public class DeviceCommandSender {
 	DeviceAdapter adapter(String name) {
 		var adapter = adapters.get(name);
 		if (adapter == null) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown adapter " + name);
+			throw ApiException.badRequest("adapter.unknown", "Den Adapter „" + name + "“ gibt es nicht.");
 		}
 		return adapter;
 	}

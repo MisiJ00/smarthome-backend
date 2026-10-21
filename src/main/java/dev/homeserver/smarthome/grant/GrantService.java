@@ -5,12 +5,11 @@ import java.util.Objects;
 
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import dev.homeserver.smarthome.device.DeviceRepository;
+import dev.homeserver.smarthome.error.ApiException;
 import dev.homeserver.smarthome.events.LiveEvents.PermissionsChanged;
 import dev.homeserver.smarthome.room.RoomRepository;
 import dev.homeserver.smarthome.user.RoleRepository;
@@ -52,7 +51,7 @@ public class GrantService {
 	@Transactional(readOnly = true)
 	public Grant get(long id) {
 		return grants.findById(id)
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No grant with id " + id));
+				.orElseThrow(() -> ApiException.notFound("grant.not_found", "Dieses Recht gibt es nicht."));
 	}
 
 	/** Unlock grants always require a confirmation, whatever the request says. */
@@ -61,22 +60,23 @@ public class GrantService {
 			Boolean requiresConfirmation) {
 		boolean subjectExists = subjectType == SubjectType.ROLE ? roles.existsById(subjectId) : users.existsById(subjectId);
 		if (!subjectExists) {
-			throw badRequest("No " + subjectType.name().toLowerCase() + " with id " + subjectId);
+			throw badRequest(subjectType == SubjectType.ROLE ? "role.not_found" : "user.not_found",
+					subjectType == SubjectType.ROLE ? "Diese Rolle gibt es nicht." : "Diesen Benutzer gibt es nicht.");
 		}
 		switch (scopeType) {
 			case ALL -> {
 				if (scopeId != null) {
-					throw badRequest("scopeId must be empty for scope all");
+					throw badRequest("grant.scope_invalid", "Bei „alle Geräte“ darf keine scopeId angegeben sein.");
 				}
 			}
 			case ROOM -> {
 				if (scopeId == null || !rooms.existsById(scopeId)) {
-					throw badRequest("No room with id " + scopeId);
+					throw badRequest("room.not_found", "Diesen Raum gibt es nicht.");
 				}
 			}
 			case DEVICE -> {
 				if (scopeId == null || !devices.existsById(scopeId)) {
-					throw badRequest("No device with id " + scopeId);
+					throw badRequest("device.not_found", "Dieses Gerät gibt es nicht.");
 				}
 			}
 		}
@@ -99,7 +99,7 @@ public class GrantService {
 	public Grant setRequiresConfirmation(long id, boolean requiresConfirmation) {
 		Grant grant = get(id);
 		if (grant.getAction() == Action.UNLOCK && !requiresConfirmation) {
-			throw badRequest("Unlocking always requires a confirmation");
+			throw badRequest("grant.unlock_needs_confirmation", "Aufschließen braucht immer eine Freigabe.");
 		}
 		grant.setRequiresConfirmation(requiresConfirmation);
 		changed(grant);
@@ -124,12 +124,12 @@ public class GrantService {
 		}
 	}
 
-	private static ResponseStatusException badRequest(String message) {
-		return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+	private static ApiException badRequest(String code, String message) {
+		return ApiException.badRequest(code, message);
 	}
 
-	private static ResponseStatusException conflict() {
-		return new ResponseStatusException(HttpStatus.CONFLICT, "This grant already exists");
+	private static ApiException conflict() {
+		return ApiException.conflict("grant.exists", "Dieses Recht gibt es schon.");
 	}
 
 }

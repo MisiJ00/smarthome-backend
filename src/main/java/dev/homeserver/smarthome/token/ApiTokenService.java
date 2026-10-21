@@ -14,9 +14,9 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import dev.homeserver.smarthome.events.LiveEvents.TokenRevoked;
+import dev.homeserver.smarthome.error.ApiException;
 import dev.homeserver.smarthome.user.CurrentUser;
 import dev.homeserver.smarthome.user.User;
 import dev.homeserver.smarthome.user.UserDisabledException;
@@ -53,10 +53,10 @@ public class ApiTokenService {
 	@Transactional
 	public CreatedToken create(long userId, String name) {
 		User user = users.findById(userId)
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User " + userId + " not found"));
+				.orElseThrow(() -> ApiException.notFound("user.not_found", "Diesen Benutzer gibt es nicht."));
 		if (!user.isMachine()) {
-			throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
-					"Tokens are only for machine users, people sign in through Kratos");
+			throw new ApiException(HttpStatus.UNPROCESSABLE_CONTENT, "token.people_not_allowed",
+					"Tokens gibt es nur für Maschinen-User; Menschen melden sich mit ihrem Konto an.");
 		}
 		byte[] bytes = new byte[32];
 		random.nextBytes(bytes);
@@ -77,7 +77,7 @@ public class ApiTokenService {
 	@Transactional
 	public void revoke(long id) {
 		if (!tokens.existsById(id)) {
-			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Token " + id + " not found");
+			throw ApiException.notFound("token.not_found", "Dieses Token gibt es nicht.");
 		}
 		tokens.deleteById(id);
 		events.publishEvent(new TokenRevoked(id));

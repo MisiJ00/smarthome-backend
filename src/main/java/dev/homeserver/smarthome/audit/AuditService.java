@@ -9,12 +9,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import dev.homeserver.smarthome.device.Device;
+import dev.homeserver.smarthome.error.ApiException;
 import dev.homeserver.smarthome.user.CurrentUser;
 
 /** Writes and searches the audit log. */
@@ -50,8 +49,8 @@ public class AuditService {
 	@Transactional(readOnly = true)
 	public Page<AuditEntry> search(Filter filter, int page, int size) {
 		if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"page must be >= 0 and size between 1 and " + MAX_PAGE_SIZE);
+			throw ApiException.badRequest("audit.page_invalid",
+					"Die Seite muss bei 0 beginnen und die Seitengröße zwischen 1 und " + MAX_PAGE_SIZE + " liegen.");
 		}
 		List<Specification<AuditEntry>> conditions = new ArrayList<>();
 		if (filter.userId() != null) {

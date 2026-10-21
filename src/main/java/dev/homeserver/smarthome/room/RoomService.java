@@ -7,7 +7,6 @@ import java.util.stream.Collectors;
 
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -15,6 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 import dev.homeserver.smarthome.device.Device;
 import dev.homeserver.smarthome.device.DeviceRepository;
 import dev.homeserver.smarthome.device.DeviceRepository.RoomDeviceCount;
+import dev.homeserver.smarthome.error.ApiException;
 import dev.homeserver.smarthome.events.LiveEvents.RoomChanged;
 import dev.homeserver.smarthome.events.LiveEvents.RoomDeleted;
 import dev.homeserver.smarthome.events.LiveEvents.RoomsReordered;
@@ -71,7 +71,7 @@ public class RoomService {
 		}
 		long visible = devices.findByRoomId(id).stream().filter(access::canView).count();
 		if (visible == 0) {
-			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No room with id " + id);
+			throw ApiException.notFound("room.not_found", "Diesen Raum gibt es nicht.");
 		}
 		return new RoomWithCount(room, visible);
 	}
@@ -125,7 +125,7 @@ public class RoomService {
 		List<Room> all = rooms.findAll();
 		var ids = all.stream().map(Room::getId).collect(Collectors.toSet());
 		if (roomIds.size() != ids.size() || !new HashSet<>(roomIds).equals(ids)) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "roomIds must contain every room exactly once");
+			throw ApiException.badRequest("room.order_incomplete", "Die Reihenfolge muss jeden Raum genau einmal enthalten.");
 		}
 		Map<Long, Room> byId = all.stream().collect(Collectors.toMap(Room::getId, room -> room));
 		for (int i = 0; i < roomIds.size(); i++) {
@@ -157,7 +157,7 @@ public class RoomService {
 
 	private Room find(long id) {
 		return rooms.findById(id)
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No room with id " + id));
+				.orElseThrow(() -> ApiException.notFound("room.not_found", "Diesen Raum gibt es nicht."));
 	}
 
 	private Room save(Room room, String name) {
@@ -173,11 +173,11 @@ public class RoomService {
 	private static String validName(String name) {
 		String trimmed = name == null ? "" : name.strip();
 		if (trimmed.isEmpty()) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "name must not be blank");
+			throw ApiException.badRequest("room.name_missing", "Bitte einen Namen angeben.");
 		}
 		if (trimmed.length() > MAX_NAME_LENGTH) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"name must be at most " + MAX_NAME_LENGTH + " characters");
+			throw ApiException.badRequest("room.name_too_long",
+					"Der Name darf höchstens " + MAX_NAME_LENGTH + " Zeichen haben.");
 		}
 		return trimmed;
 	}
@@ -188,14 +188,14 @@ public class RoomService {
 		}
 		String trimmed = icon.strip();
 		if (trimmed.length() > MAX_ICON_LENGTH) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"icon must be at most " + MAX_ICON_LENGTH + " characters");
+			throw ApiException.badRequest("room.icon_too_long",
+					"Das Icon darf höchstens " + MAX_ICON_LENGTH + " Zeichen haben.");
 		}
 		return trimmed;
 	}
 
-	private static ResponseStatusException nameTaken(String name) {
-		return new ResponseStatusException(HttpStatus.CONFLICT, "A room named \"" + name + "\" already exists");
+	private static ApiException nameTaken(String name) {
+		return ApiException.conflict("room.name_taken", "Einen Raum „" + name + "“ gibt es schon.");
 	}
 
 }

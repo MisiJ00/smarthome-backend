@@ -14,9 +14,11 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 import dev.homeserver.smarthome.device.DeviceAdapter;
+import dev.homeserver.smarthome.error.ApiException;
 import dev.homeserver.smarthome.device.DeviceStateChanged;
 import dev.homeserver.smarthome.device.DiscoveredDevice;
 import dev.homeserver.smarthome.events.LiveEvents.DeviceDiscovered;
@@ -82,7 +84,8 @@ public class Z2mAdapter implements DeviceAdapter {
 	public void send(String externalId, Map<String, Object> command) {
 		var device = devices.get(externalId);
 		if (device == null) {
-			throw new IllegalStateException("Zigbee2MQTT does not know device " + externalId);
+			throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "device.unavailable",
+					"Zigbee2MQTT kennt das Gerät gerade nicht. Ist es noch verbunden?");
 		}
 		publisher.publish(base + "/" + device.friendlyName() + "/set", json.writeValueAsString(command));
 	}

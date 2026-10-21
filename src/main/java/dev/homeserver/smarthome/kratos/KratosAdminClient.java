@@ -13,9 +13,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
-import org.springframework.web.server.ResponseStatusException;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+
+import dev.homeserver.smarthome.error.ApiException;
 
 /**
  * Talks to the Kratos admin API: creates, changes and deletes identities and hands out setup codes. Errors from Kratos
@@ -93,7 +94,8 @@ public class KratosAdminClient {
 
 	private <T> T call(Supplier<T> request) {
 		if (properties.adminUrl() == null || properties.adminUrl().isBlank()) {
-			throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Kratos admin API is not configured");
+			throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "kratos.not_configured",
+					"Die Kontoverwaltung (Kratos) ist nicht eingerichtet.");
 		}
 		try {
 			return request.get();
@@ -102,16 +104,21 @@ public class KratosAdminClient {
 			throw translate(e.getStatusCode(), e.getResponseBodyAsString());
 		}
 		catch (ResourceAccessException e) {
-			throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Kratos is not reachable");
+			throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "kratos.unreachable",
+					"Die Kontoverwaltung (Kratos) ist gerade nicht erreichbar.");
 		}
 	}
 
-	private static ResponseStatusException translate(HttpStatusCode status, String body) {
+	private static ApiException translate(HttpStatusCode status, String body) {
 		return switch (status.value()) {
-			case 409 -> new ResponseStatusException(HttpStatus.CONFLICT, "Email or username is already taken");
-			case 400 -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Kratos rejected the account: " + body);
-			case 404 -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Identity not found in Kratos");
-			default -> new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Kratos answered " + status.value());
+			case 409 -> ApiException.conflict("account.taken", "E-Mail-Adresse oder Benutzername ist schon vergeben.");
+			case 400 -> ApiException.badRequest("account.invalid",
+					"Die Kontodaten sind ungültig (E-Mail-Adresse prüfen; Benutzername: 3 bis 32 Zeichen, "
+							+ "Kleinbuchstaben, Ziffern, Punkt, Bindestrich, Unterstrich).")
+					.with("kratos", body);
+			case 404 -> ApiException.notFound("account.not_found", "Das Konto gibt es in der Kontoverwaltung nicht.");
+			default -> new ApiException(HttpStatus.BAD_GATEWAY, "kratos.error",
+					"Die Kontoverwaltung hat mit einem Fehler geantwortet (" + status.value() + ").");
 		};
 	}
 

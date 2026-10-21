@@ -1,13 +1,14 @@
 package dev.homeserver.smarthome.device;
 
 import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
 
-/** A command was refused by a safety rule. Answered with 403 and the reason. */
-public class CommandRefusedException extends ResponseStatusException {
+import dev.homeserver.smarthome.error.ApiException;
 
-	public CommandRefusedException(String message) {
-		super(HttpStatus.FORBIDDEN, message);
+/** A command was refused by a safety rule or a missing permission. Answered with 403, the reason and a code. */
+public class CommandRefusedException extends ApiException {
+
+	public CommandRefusedException(String code, String message) {
+		super(HttpStatus.FORBIDDEN, code, message);
 	}
 
 }

@@ -17,10 +17,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import dev.homeserver.smarthome.audit.Via;
 import dev.homeserver.smarthome.device.DeviceService.CommandStatus;
+import dev.homeserver.smarthome.error.ApiException;
 import dev.homeserver.smarthome.grant.Action;
 import dev.homeserver.smarthome.grant.PermissionService;
 import dev.homeserver.smarthome.grant.PermissionService.Access;
@@ -64,7 +64,7 @@ public class DeviceController {
 				devices = service.listInRoom(me, Long.parseLong(roomId));
 			}
 			catch (NumberFormatException e) {
-				throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "roomId must be a room id or \"none\"");
+				throw ApiException.badRequest("device.room_filter_invalid", "roomId muss eine Raum-ID oder „none“ sein.");
 			}
 		}
 		Access access = permissions.accessOf(me);

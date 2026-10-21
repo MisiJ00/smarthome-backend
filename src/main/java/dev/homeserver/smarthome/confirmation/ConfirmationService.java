@@ -6,11 +6,9 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import dev.homeserver.smarthome.audit.AuditResult;
 import dev.homeserver.smarthome.audit.AuditService;
@@ -19,6 +17,7 @@ import dev.homeserver.smarthome.device.CommandGuard;
 import dev.homeserver.smarthome.device.Device;
 import dev.homeserver.smarthome.device.DeviceCommandSender;
 import dev.homeserver.smarthome.device.DeviceRepository;
+import dev.homeserver.smarthome.error.ApiException;
 import dev.homeserver.smarthome.events.LiveEvents.ConfirmationChanged;
 import dev.homeserver.smarthome.grant.Action;
 import dev.homeserver.smarthome.grant.PermissionService;
@@ -92,14 +91,14 @@ public class ConfirmationService {
 	public Challenge challenge(CurrentUser user, long id) {
 		var confirmation = get(user, id);
 		if (confirmation.getStatus() != ConfirmationStatus.PENDING) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT,
-					"Confirmation " + id + " is already " + confirmation.getStatus().dbValue());
+			throw ApiException.conflict("confirmation.decided", "Diese Anfrage ist schon " + statusText(confirmation) + ".")
+					.with("status", confirmation.getStatus().dbValue());
 		}
 		if (!canApproveSigned(user, confirmation)) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to decide this confirmation");
+			throw ApiException.forbidden("confirmation.not_allowed", "Du darfst über diese Anfrage nicht entscheiden.");
 		}
 		if (!trustedDevices.hasActive(user.id())) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "Register a phone first");
+			throw ApiException.conflict("phone.none", "Bitte zuerst dieses Handy für Freigaben registrieren.");
 		}
 		var challenge = challenges.create(confirmation.getId(), user.id());
 		return new Challenge(challenge.getNonce(), payload(confirmation, challenge.getNonce()), challenge.getExpiresAt());
@@ -169,12 +168,12 @@ public class ConfirmationService {
 		}
 		else {
 			if (user.identityId() == null) {
-				throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only people can approve with a phone");
+				throw ApiException.forbidden("phone.machine", "Nur Menschen können mit einem Handy freigeben.");
 			}
 			challenges.consume(id, user.id(), signed.nonce());
 			confirmation = pending(user, id);
 			if (!canApproveSigned(user, confirmation)) {
-				throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to decide this confirmation");
+				throw ApiException.forbidden("confirmation.not_allowed", "Du darfst über diese Anfrage nicht entscheiden.");
 			}
 			phone = trustedDevices.verify(user.id(), signed.trustedDeviceId(), payload(confirmation, signed.nonce()),
 					signed.signature()).getName();
@@ -184,7 +183,8 @@ public class ConfirmationService {
 		CommandGuard.check(device, confirmation.getParams());
 		var requester = users.findById(confirmation.getUserId()).map(u -> CurrentUser.of(u, null)).orElseThrow();
 		if (permissions.can(requester, device, confirmation.getAction()) == Decision.DENIED) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "The requester is no longer allowed to do this");
+			throw ApiException.conflict("confirmation.requester_not_allowed",
+					"Wer gefragt hat, darf das inzwischen nicht mehr.");
 		}
 		sender.send(device, confirmation.getParams());
 		confirmation.decide(ConfirmationStatus.APPROVED, user.id());
@@ -241,9 +241,10 @@ public class ConfirmationService {
 	private Confirmation pendingForDecision(CurrentUser user, long id) {
 		var confirmation = pending(user, id);
 		if (!canDecide(user, confirmation)) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-					user.id() == confirmation.getUserId() ? "You cannot confirm your own request"
-							: "Not allowed to decide this confirmation");
+			throw user.id() == confirmation.getUserId()
+					? ApiException.forbidden("confirmation.own_request",
+							"Die eigene Anfrage kannst du nur mit einem registrierten Handy freigeben.")
+					: ApiException.forbidden("confirmation.not_allowed", "Du darfst über diese Anfrage nicht entscheiden.");
 		}
 		return confirmation;
 	}
@@ -258,8 +259,8 @@ public class ConfirmationService {
 			expireDue();
 		}
 		if (confirmation.getStatus() != ConfirmationStatus.PENDING) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT,
-					"Confirmation " + id + " is already " + confirmation.getStatus().dbValue());
+			throw ApiException.conflict("confirmation.decided", "Diese Anfrage ist schon " + statusText(confirmation) + ".")
+					.with("status", confirmation.getStatus().dbValue());
 		}
 		return confirmation;
 	}
@@ -277,8 +278,17 @@ public class ConfirmationService {
 		return params;
 	}
 
-	private static ResponseStatusException notFound(long id) {
-		return new ResponseStatusException(HttpStatus.NOT_FOUND, "No confirmation with id " + id);
+	private static ApiException notFound(long id) {
+		return ApiException.notFound("confirmation.not_found", "Diese Anfrage gibt es nicht (mehr).");
+	}
+
+	private static String statusText(Confirmation confirmation) {
+		return switch (confirmation.getStatus()) {
+			case APPROVED -> "freigegeben";
+			case REJECTED -> "abgelehnt";
+			case EXPIRED -> "abgelaufen";
+			case PENDING -> "offen";
+		};
 	}
 
 }

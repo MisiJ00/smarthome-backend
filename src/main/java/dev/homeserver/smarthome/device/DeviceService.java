@@ -7,10 +7,8 @@ import java.util.Map;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -19,6 +17,7 @@ import dev.homeserver.smarthome.audit.AuditService;
 import dev.homeserver.smarthome.audit.Via;
 import dev.homeserver.smarthome.confirmation.Confirmation;
 import dev.homeserver.smarthome.confirmation.ConfirmationService;
+import dev.homeserver.smarthome.error.ApiException;
 import dev.homeserver.smarthome.events.LiveEvents.DeviceChanged;
 import dev.homeserver.smarthome.events.LiveEvents.DeviceRemoved;
 import dev.homeserver.smarthome.events.LiveEvents.DeviceStateUpdated;
@@ -75,7 +74,7 @@ public class DeviceService {
 	@Transactional(readOnly = true)
 	public List<Device> listInRoom(CurrentUser user, long roomId) {
 		if (!rooms.existsById(roomId)) {
-			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No room with id " + roomId);
+			throw ApiException.notFound("room.not_found", "Diesen Raum gibt es nicht.");
 		}
 		return visible(user, devices.findByRoomId(roomId));
 	}
@@ -112,16 +111,16 @@ public class DeviceService {
 	@Transactional
 	public Device add(String adapter, String externalId, String name, Long roomId) {
 		if (devices.existsByAdapterAndExternalId(adapter, externalId)) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "Device has already been added");
+			throw ApiException.conflict("device.already_added", "Dieses Gerät wurde schon übernommen.");
 		}
 		if (roomId != null && !rooms.existsById(roomId)) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Room does not exist");
+			throw ApiException.badRequest("room.not_found", "Diesen Raum gibt es nicht.");
 		}
 		var discovered = sender.adapter(adapter).discovered().stream()
 				.filter(d -> d.externalId().equals(externalId))
 				.findFirst()
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-						"Adapter " + adapter + " does not see device " + externalId));
+				.orElseThrow(() -> ApiException.notFound("device.not_discovered",
+						"Das Gerät ist nicht (mehr) unter den gefundenen Geräten."));
 		var device = save(new Device(discovered, name, roomId));
 		events.publishEvent(new DeviceChanged(device.getId(), null));
 		return device;
@@ -138,17 +137,18 @@ public class DeviceService {
 		var before = device.copy();
 		var access = permissions.accessOf(user);
 		if ((name != null || setRoom) && access.can(device, Action.CONFIGURE) != Decision.ALLOWED) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to configure " + device.getName());
+			throw ApiException.forbidden("device.configure_not_allowed",
+					"Du darfst " + device.getName() + " nicht umbenennen oder verschieben.");
 		}
 		if (lockedActions != null && !access.isAdmin()) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only admins can lock actions");
+			throw ApiException.forbidden("device.lock_actions_admin_only", "Nur Admins können Aktionen sperren.");
 		}
 		if (name != null) {
 			device.setName(name);
 		}
 		if (setRoom) {
 			if (roomId != null && !rooms.existsById(roomId)) {
-				throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Room does not exist");
+				throw ApiException.badRequest("room.not_found", "Diesen Raum gibt es nicht.");
 			}
 			device.setRoomId(roomId);
 		}
@@ -195,7 +195,9 @@ public class DeviceService {
 		switch (access.can(device, action)) {
 			case DENIED -> {
 				audit.record(user, via, device, action.dbValue(), command, AuditResult.DENIED, null);
-				throw new CommandRefusedException("Not allowed to " + action.dbValue() + " " + device.getName());
+				throw new CommandRefusedException("device.not_allowed", action == Action.UNLOCK
+						? "Du darfst " + device.getName() + " nicht aufschließen."
+						: "Du darfst " + device.getName() + " nicht schalten.");
 			}
 			case NEEDS_CONFIRMATION -> {
 				var confirmation = confirmations.request(user, via, device, action, command);
@@ -223,8 +225,8 @@ public class DeviceService {
 		return candidates.stream().filter(access::canView).toList();
 	}
 
-	private static ResponseStatusException notFound(long id) {
-		return new ResponseStatusException(HttpStatus.NOT_FOUND, "No device with id " + id);
+	private static ApiException notFound(long id) {
+		return ApiException.notFound("device.not_found", "Dieses Gerät gibt es nicht.");
 	}
 
 	private Device save(Device device) {
@@ -232,7 +234,7 @@ public class DeviceService {
 			return devices.saveAndFlush(device);
 		}
 		catch (DataIntegrityViolationException e) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Room does not exist");
+			throw ApiException.badRequest("room.not_found", "Diesen Raum gibt es nicht.");
 		}
 	}
 

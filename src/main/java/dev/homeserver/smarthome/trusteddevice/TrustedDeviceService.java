@@ -5,14 +5,13 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import dev.homeserver.smarthome.audit.AuditResult;
 import dev.homeserver.smarthome.audit.AuditService;
 import dev.homeserver.smarthome.audit.Via;
+import dev.homeserver.smarthome.error.ApiException;
 import dev.homeserver.smarthome.user.CurrentUser;
 
 /**
@@ -42,25 +41,23 @@ public class TrustedDeviceService {
 	@Transactional
 	public TrustedDevice register(CurrentUser user, Via via, Instant authTime, String name, String publicKey) {
 		if (user.identityId() == null) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only people can register a phone");
+			throw ApiException.forbidden("phone.machine", "Nur Menschen können ein Handy registrieren.");
 		}
 		if (authTime == null || authTime.isBefore(Instant.now().minus(properties.maxAuthAge()))) {
-			var e = new ResponseStatusException(HttpStatus.FORBIDDEN,
-					"Sign in again (password and second factor) to register a phone");
-			e.getBody().setProperty("reason", "fresh_login_required");
-			throw e;
+			throw ApiException.forbidden("phone.fresh_login_required",
+					"Bitte neu anmelden (Passwort und ggf. zweiter Faktor), um ein Handy zu registrieren.")
+					.with("reason", "fresh_login_required");
 		}
 		String trimmed = name == null ? "" : name.strip();
 		if (trimmed.isEmpty() || trimmed.length() > MAX_NAME_LENGTH) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"name must have 1 to " + MAX_NAME_LENGTH + " characters");
+			throw ApiException.badRequest("phone.name_invalid", "Der Name muss 1 bis " + MAX_NAME_LENGTH + " Zeichen haben.");
 		}
 		String key;
 		try {
 			key = DeviceKeys.normalize(publicKey == null ? "" : publicKey);
 		}
 		catch (IllegalArgumentException e) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+			throw ApiException.badRequest("phone.key_invalid", "Der Schlüssel ist ungültig: " + e.getMessage());
 		}
 		if (trustedDevices.existsByPublicKey(key)) {
 			throw keyTaken();
@@ -92,7 +89,7 @@ public class TrustedDeviceService {
 	public TrustedDevice revoke(CurrentUser by, Via via, long userId, long id) {
 		TrustedDevice device = trustedDevices.findById(id)
 				.filter(d -> d.getUserId() == userId)
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No trusted device with id " + id));
+				.orElseThrow(() -> ApiException.notFound("phone.not_found", "Dieses Handy gibt es nicht."));
 		if (!device.isRevoked()) {
 			device.revoke();
 			audit.record(by, via, null, AUDIT_ACTION,
@@ -110,16 +107,16 @@ public class TrustedDeviceService {
 	public TrustedDevice verify(long userId, long trustedDeviceId, String payload, String signature) {
 		TrustedDevice device = trustedDevices.findById(trustedDeviceId)
 				.filter(d -> d.getUserId() == userId && !d.isRevoked())
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Unknown or revoked phone"));
+				.orElseThrow(() -> ApiException.forbidden("phone.unknown", "Dieses Handy ist unbekannt oder gesperrt."));
 		if (signature == null || !DeviceKeys.verify(device.getPublicKey(), payload, signature)) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Invalid signature");
+			throw ApiException.forbidden("phone.signature_invalid", "Die Unterschrift des Handys stimmt nicht.");
 		}
 		device.used();
 		return device;
 	}
 
-	private static ResponseStatusException keyTaken() {
-		return new ResponseStatusException(HttpStatus.CONFLICT, "This key is already registered");
+	private static ApiException keyTaken() {
+		return ApiException.conflict("phone.key_taken", "Dieser Schlüssel ist schon registriert.");
 	}
 
 }
