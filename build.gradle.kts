@@ -42,6 +42,8 @@ dependencies {
 	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
 	testImplementation("org.springframework.boot:spring-boot-starter-websocket-test")
 	testImplementation("org.springframework.boot:spring-boot-testcontainers")
+	// The Zigbee2MQTT simulator plays the counterpart in pairing tests
+	testImplementation(project(":simulator"))
 	testImplementation("org.springframework.integration:spring-integration-test")
 	testImplementation("org.testcontainers:testcontainers-junit-jupiter")
 	testImplementation("org.testcontainers:testcontainers-postgresql")

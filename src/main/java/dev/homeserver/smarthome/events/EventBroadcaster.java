@@ -16,8 +16,10 @@ import dev.homeserver.smarthome.device.DeviceRepository;
 import dev.homeserver.smarthome.events.EventHub.Connection;
 import dev.homeserver.smarthome.events.LiveEvents.ConfirmationChanged;
 import dev.homeserver.smarthome.events.LiveEvents.DeviceChanged;
+import dev.homeserver.smarthome.events.LiveEvents.DeviceDiscovered;
 import dev.homeserver.smarthome.events.LiveEvents.DeviceRemoved;
 import dev.homeserver.smarthome.events.LiveEvents.DeviceStateUpdated;
+import dev.homeserver.smarthome.events.LiveEvents.PairingChanged;
 import dev.homeserver.smarthome.events.LiveEvents.PermissionsChanged;
 import dev.homeserver.smarthome.events.LiveEvents.RoomChanged;
 import dev.homeserver.smarthome.events.LiveEvents.RoomDeleted;
@@ -155,6 +157,34 @@ public class EventBroadcaster {
 					|| (event.roleName() != null && c.user().roles().contains(event.roleName()));
 			if (affected) {
 				hub.send(c, "permissions.changed", Map.of());
+			}
+		}
+	}
+
+	/** Pairing mode concerns admins only (only they can open it and add devices). */
+	@TransactionalEventListener(fallbackExecution = true)
+	public void on(PairingChanged event) {
+		var data = new Pairing(event.adapter(), event.active(), event.endsAt());
+		for (Connection c : hub.connections()) {
+			if (c.isAdmin()) {
+				hub.send(c, event.active() ? "pairing.started" : "pairing.stopped", data);
+			}
+		}
+	}
+
+	public record Pairing(String adapter, boolean active, Instant endsAt) {
+	}
+
+	/** A newly paired device, as in {@code GET /api/devices/discovered}; to admins, unless it was added already. */
+	@TransactionalEventListener(fallbackExecution = true)
+	public void on(DeviceDiscovered event) {
+		var device = event.device();
+		if (devices.existsByAdapterAndExternalId(device.adapter(), device.externalId())) {
+			return;
+		}
+		for (Connection c : hub.connections()) {
+			if (c.isAdmin()) {
+				hub.send(c, "device.discovered", device);
 			}
 		}
 	}

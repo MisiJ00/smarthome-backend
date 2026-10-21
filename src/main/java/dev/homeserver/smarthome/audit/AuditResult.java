@@ -38,7 +38,15 @@ public enum AuditResult {
 
 	/** A phone was revoked. */
 	@JsonProperty("revoked")
-	REVOKED;
+	REVOKED,
+
+	/** Pairing mode was opened. */
+	@JsonProperty("started")
+	STARTED,
+
+	/** Pairing mode was closed. */
+	@JsonProperty("stopped")
+	STOPPED;
 
 	public String dbValue() {
 		return name().toLowerCase();

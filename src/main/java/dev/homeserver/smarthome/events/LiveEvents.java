@@ -1,6 +1,9 @@
 package dev.homeserver.smarthome.events;
 
+import java.time.Instant;
+
 import dev.homeserver.smarthome.device.Device;
+import dev.homeserver.smarthome.device.DiscoveredDevice;
 
 /**
  * Application events the services publish when something changes. {@link EventBroadcaster} turns them into messages
@@ -46,6 +49,14 @@ public final class LiveEvents {
 
 	/** A machine token was revoked: connections opened with it end. */
 	public record TokenRevoked(long tokenId) {
+	}
+
+	/** Pairing (permit join) was started or ended in an adapter; {@code endsAt} may be unknown. */
+	public record PairingChanged(String adapter, boolean active, Instant endsAt) {
+	}
+
+	/** An adapter sees a device it did not see before, i.e. one that was just paired. */
+	public record DeviceDiscovered(DiscoveredDevice device) {
 	}
 
 }

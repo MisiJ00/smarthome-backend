@@ -49,7 +49,7 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.DELETE, "/api/devices/*").hasRole(Role.ADMIN)
 						.requestMatchers("/api/devices", "/api/devices/**").authenticated()
 						.requestMatchers("/api/tokens/**", "/api/users", "/api/users/**", "/api/roles", "/api/roles/**",
-								"/api/grants", "/api/grants/**", "/api/audit", "/api/audit/**").hasRole(Role.ADMIN)
+								"/api/grants", "/api/grants/**", "/api/audit", "/api/audit/**", "/api/adapters/**").hasRole(Role.ADMIN)
 						.anyRequest().authenticated())
 				.oauth2ResourceServer(oauth2 -> oauth2.authenticationManagerResolver(request -> bearerTokens))
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

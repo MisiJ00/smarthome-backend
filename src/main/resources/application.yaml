@@ -45,6 +45,8 @@ smarthome:
     password: ${MQTT_PASSWORD:}
     client-id: smarthome-backend
     z2m-base-topic: zigbee2mqtt
+    # How long to wait for Zigbee2MQTT to answer a bridge request (e.g. permit join)
+    z2m-request-timeout: ${Z2M_REQUEST_TIMEOUT:5s}
 
 management:
   endpoints:
