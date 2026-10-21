@@ -1,5 +1,6 @@
 package dev.homeserver.smarthome;
 
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
@@ -21,14 +22,23 @@ public class TestcontainersConfiguration {
 
 	@Bean
 	GenericContainer<?> mosquittoContainer() {
+		// Users and ACL as in production (see src/test/resources/mosquitto)
 		return new GenericContainer<>(DockerImageName.parse("eclipse-mosquitto:2"))
-				.withCommand("mosquitto", "-c", "/mosquitto-no-auth.conf")
+				.withCopyFileToContainer(MountableFile.forClasspathResource("mosquitto/"), "/mosquitto/config/")
+				.withEnv("MQTT_BACKEND_PASSWORD", MQTT_BACKEND_PASSWORD)
+				.withEnv("MQTT_Z2M_PASSWORD", MQTT_Z2M_PASSWORD)
+				.withEnv("MQTT_SIMULATOR_PASSWORD", MQTT_SIMULATOR_PASSWORD)
+				.withCommand("/bin/sh", "/mosquitto/config/start.sh")
 				.withExposedPorts(1883);
 	}
 
 	@Bean
 	DynamicPropertyRegistrar mqttProperties(GenericContainer<?> mosquittoContainer) {
-		return registry -> registry.add("smarthome.mqtt.url", () -> mqttUrl(mosquittoContainer));
+		return registry -> {
+			registry.add("smarthome.mqtt.url", () -> mqttUrl(mosquittoContainer));
+			registry.add("smarthome.mqtt.username", () -> "backend");
+			registry.add("smarthome.mqtt.password", () -> MQTT_BACKEND_PASSWORD);
+		};
 	}
 
 	@Bean
@@ -66,6 +76,19 @@ public class TestcontainersConfiguration {
 			registry.add("smarthome.auth.issuer", () -> TestJwts.ISSUER);
 			registry.add("smarthome.auth.initial-admin", () -> "admin@example.com");
 		};
+	}
+
+	public static final String MQTT_BACKEND_PASSWORD = "test-backend";
+	public static final String MQTT_Z2M_PASSWORD = "test-zigbee2mqtt";
+	public static final String MQTT_SIMULATOR_PASSWORD = "test-simulator";
+
+	/** Connection options for a test client that plays Zigbee2MQTT. */
+	public static MqttConnectOptions zigbee2mqttLogin() {
+		var options = new MqttConnectOptions();
+		options.setUserName("zigbee2mqtt");
+		options.setPassword(MQTT_Z2M_PASSWORD.toCharArray());
+		options.setMaxInflight(100);
+		return options;
 	}
 
 	public static String mqttUrl(GenericContainer<?> mosquitto) {

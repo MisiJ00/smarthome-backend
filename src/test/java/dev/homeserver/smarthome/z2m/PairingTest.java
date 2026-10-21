@@ -69,8 +69,8 @@ class PairingTest {
 
 	@BeforeEach
 	void startSimulator() throws Exception {
-		simulator = Simulator.withStandardDevices(TestcontainersConfiguration.mqttUrl(mosquittoContainer), null, null,
-				"zigbee2mqtt", 1);
+		simulator = Simulator.withStandardDevices(TestcontainersConfiguration.mqttUrl(mosquittoContainer), "simulator",
+				TestcontainersConfiguration.MQTT_SIMULATOR_PASSWORD, "zigbee2mqtt", 1);
 		simulator.start();
 		// The simulator reports bridge/info on connect
 		await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> as(ADMIN, get("/api/adapters/z2m/permit-join"))

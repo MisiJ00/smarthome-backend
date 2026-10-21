@@ -16,6 +16,8 @@ public class MqttConfig {
 		options.setServerURIs(new String[] { properties.url() });
 		options.setAutomaticReconnect(true);
 		options.setCleanSession(true);
+		// On startup every device is asked for its state at once; Paho's default of 10 in flight is too few
+		options.setMaxInflight(100);
 		if (properties.username() != null && !properties.username().isBlank()) {
 			options.setUserName(properties.username());
 			options.setPassword(properties.password() == null ? new char[0] : properties.password().toCharArray());

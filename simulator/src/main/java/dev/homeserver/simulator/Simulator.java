@@ -68,6 +68,8 @@ public class Simulator implements MqttCallbackExtended {
 		this.options = new MqttConnectOptions();
 		options.setAutomaticReconnect(true);
 		options.setCleanSession(true);
+		// The backend asks every device for its state at once on startup; Paho's default of 10 is too few
+		options.setMaxInflight(100);
 		options.setWill(base + "/bridge/state", "{\"state\":\"offline\"}".getBytes(), 1, true);
 		if (user != null && !user.isBlank()) {
 			options.setUserName(user);

@@ -61,7 +61,7 @@ class DeviceFlowTest {
 		admin = users.signIn(UUID.randomUUID(), "Admin", "admin@example.com", "admin");
 		zigbee2mqtt = new MqttClient(TestcontainersConfiguration.mqttUrl(mosquittoContainer), "fake-z2m",
 				new MemoryPersistence());
-		zigbee2mqtt.connect();
+		zigbee2mqtt.connect(TestcontainersConfiguration.zigbee2mqttLogin());
 		zigbee2mqtt.subscribe("zigbee2mqtt/+/set", (topic, message) -> received.put(topic, new String(message.getPayload())));
 		zigbee2mqtt.subscribe("zigbee2mqtt/+/get", (topic, message) -> received.put(topic, new String(message.getPayload())));
 	}

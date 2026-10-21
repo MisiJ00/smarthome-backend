@@ -1,0 +1,26 @@
+# Wer darf was (Minimalprinzip). Zigbee2MQTT-Gerätenamen ohne „/“ bzw. mit höchstens einer Ebene („Raum/Lampe“),
+# sonst passen die Befehls-Topics des Backends nicht.
+
+# Backend: liest alles von Zigbee2MQTT, schreibt nur Befehle und Bridge-Anfragen (z. B. Anlernmodus),
+# also keine gefälschten Gerätezustände.
+user backend
+topic read zigbee2mqtt/#
+topic write zigbee2mqtt/+/set
+topic write zigbee2mqtt/+/+/set
+topic write zigbee2mqtt/+/get
+topic write zigbee2mqtt/+/+/get
+topic write zigbee2mqtt/bridge/request/#
+
+# Zigbee2MQTT: nur sein eigener Bereich
+user zigbee2mqtt
+topic readwrite zigbee2mqtt/#
+
+# Simulator: spielt Zigbee2MQTT, nur für die Entwicklung (auf dem Server kein Passwort, also kein Benutzer)
+user simulator
+topic readwrite zigbee2mqtt/#
+
+# Später, wenn die Geräte da sind (Passwort in start.sh und .env ergänzen, Backend-Rechte erweitern):
+# user shelly
+# topic readwrite shellies/#
+# user esphome
+# topic readwrite esphome/#

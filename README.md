@@ -58,10 +58,10 @@ The AI and scripts don't sign in at Kratos. They send an API token instead: `Aut
 Without hardware, the simulator pretends to be Zigbee2MQTT on the same Mosquitto: a lamp, a radiator thermostat, a power-metering plug (stands in for the server plug) and a door lock. Start it in a second terminal:
 
 ```bash
-./gradlew :simulator:run
+MQTT_USER=simulator MQTT_PASSWORD=<MQTT_SIMULATOR_PASSWORD from homeserver-infra/.env> ./gradlew :simulator:run
 ```
 
-It uses the same environment variables `MQTT_URL`, `MQTT_USER`, `MQTT_PASSWORD`, plus `Z2M_BASE_TOPIC` (default `zigbee2mqtt`).
+It uses the same environment variables `MQTT_URL`, `MQTT_USER`, `MQTT_PASSWORD`, plus `Z2M_BASE_TOPIC` (default `zigbee2mqtt`). Mosquitto refuses anonymous clients; the `simulator` user may only use `zigbee2mqtt/#` and exists only where `MQTT_SIMULATOR_PASSWORD` is set (never on the server).
 
 ## Devices API
 
