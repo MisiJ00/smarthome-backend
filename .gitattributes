@@ -1,3 +1,6 @@
 /gradlew text eol=lf
 *.bat text eol=crlf
 *.jar binary
+# Run inside Linux containers (Mosquitto in the tests)
+*.sh text eol=lf
+src/test/resources/mosquitto/* text eol=lf
