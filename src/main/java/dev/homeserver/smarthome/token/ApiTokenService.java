@@ -10,11 +10,13 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import dev.homeserver.smarthome.events.LiveEvents.TokenRevoked;
 import dev.homeserver.smarthome.user.CurrentUser;
 import dev.homeserver.smarthome.user.User;
 import dev.homeserver.smarthome.user.UserDisabledException;
@@ -33,13 +35,19 @@ public class ApiTokenService {
 	private final SecureRandom random = new SecureRandom();
 	private final ApiTokenRepository tokens;
 	private final UserRepository users;
+	private final ApplicationEventPublisher events;
 
-	public ApiTokenService(ApiTokenRepository tokens, UserRepository users) {
+	public ApiTokenService(ApiTokenRepository tokens, UserRepository users, ApplicationEventPublisher events) {
 		this.tokens = tokens;
 		this.users = users;
+		this.events = events;
 	}
 
 	public record CreatedToken(ApiToken token, String secret) {
+	}
+
+	/** A machine user signed in with one of its tokens. */
+	public record TokenLogin(CurrentUser user, long tokenId) {
 	}
 
 	@Transactional
@@ -72,19 +80,25 @@ public class ApiTokenService {
 			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Token " + id + " not found");
 		}
 		tokens.deleteById(id);
+		events.publishEvent(new TokenRevoked(id));
 	}
 
 	/** The user behind a token, or empty if the token is unknown. */
 	@Transactional
-	public Optional<CurrentUser> authenticate(String secret) {
+	public Optional<TokenLogin> authenticate(String secret) {
 		return tokens.findByTokenHash(hash(secret)).map(token -> {
 			token.setLastUsed(Instant.now());
 			User user = users.findById(token.getUserId()).orElseThrow();
 			if (!user.isActive()) {
 				throw new UserDisabledException(user);
 			}
-			return CurrentUser.of(user, null);
+			return new TokenLogin(CurrentUser.of(user, null), token.getId());
 		});
+	}
+
+	@Transactional(readOnly = true)
+	public boolean exists(long tokenId) {
+		return tokens.existsById(tokenId);
 	}
 
 	private static String hash(String secret) {

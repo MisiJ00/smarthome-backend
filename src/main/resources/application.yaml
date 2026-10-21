@@ -34,6 +34,11 @@ smarthome:
     max-auth-age: ${TRUSTED_DEVICE_MAX_AUTH_AGE:15m}
     # How long a phone has to sign a challenge
     challenge-lifetime: ${TRUSTED_DEVICE_CHALLENGE_LIFETIME:60s}
+  events:
+    # Live updates (/api/events): ticket validity, maximum connection age, ping and recheck interval
+    ticket-lifetime: ${EVENTS_TICKET_LIFETIME:30s}
+    max-connection-age: ${EVENTS_MAX_CONNECTION_AGE:1h}
+    heartbeat: ${EVENTS_HEARTBEAT:30s}
   mqtt:
     url: ${MQTT_URL:tcp://localhost:1883}
     username: ${MQTT_USER:}

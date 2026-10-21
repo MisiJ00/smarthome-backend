@@ -4,11 +4,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import dev.homeserver.smarthome.events.LiveEvents.PermissionsChanged;
+import dev.homeserver.smarthome.events.LiveEvents.UserAccessEnded;
 import dev.homeserver.smarthome.kratos.KratosAdminClient;
 import dev.homeserver.smarthome.kratos.KratosAdminClient.SetupCode;
 import dev.homeserver.smarthome.kratos.KratosAdminClient.Traits;
@@ -25,11 +28,14 @@ public class UserAdminService {
 	private final UserRepository users;
 	private final RoleRepository roles;
 	private final KratosAdminClient kratos;
+	private final ApplicationEventPublisher events;
 
-	public UserAdminService(UserRepository users, RoleRepository roles, KratosAdminClient kratos) {
+	public UserAdminService(UserRepository users, RoleRepository roles, KratosAdminClient kratos,
+			ApplicationEventPublisher events) {
 		this.users = users;
 		this.roles = roles;
 		this.kratos = kratos;
+		this.events = events;
 	}
 
 	public record CreatedUser(User user, SetupCode setupCode) {
@@ -104,6 +110,9 @@ public class UserAdminService {
 				kratos.setActive(user.getIdentityId(), active);
 			}
 		}
+		if (Boolean.FALSE.equals(active)) {
+			events.publishEvent(new UserAccessEnded(id));
+		}
 		return user;
 	}
 
@@ -121,6 +130,7 @@ public class UserAdminService {
 		}
 		user.getRoles().clear();
 		user.getRoles().addAll(newRoles);
+		events.publishEvent(new PermissionsChanged(id, null));
 		return user;
 	}
 
@@ -135,6 +145,7 @@ public class UserAdminService {
 		users.delete(user);
 		users.flush();
 		kratos.deleteIdentity(user.getIdentityId());
+		events.publishEvent(new UserAccessEnded(id));
 	}
 
 	/** Refuses changes that would leave no active admin. */

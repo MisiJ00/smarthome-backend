@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -14,6 +15,9 @@ import org.springframework.web.server.ResponseStatusException;
 import dev.homeserver.smarthome.device.Device;
 import dev.homeserver.smarthome.device.DeviceRepository;
 import dev.homeserver.smarthome.device.DeviceRepository.RoomDeviceCount;
+import dev.homeserver.smarthome.events.LiveEvents.RoomChanged;
+import dev.homeserver.smarthome.events.LiveEvents.RoomDeleted;
+import dev.homeserver.smarthome.events.LiveEvents.RoomsReordered;
 import dev.homeserver.smarthome.grant.PermissionService;
 import dev.homeserver.smarthome.grant.PermissionService.Access;
 import dev.homeserver.smarthome.user.CurrentUser;
@@ -27,11 +31,14 @@ public class RoomService {
 	private final RoomRepository rooms;
 	private final DeviceRepository devices;
 	private final PermissionService permissions;
+	private final ApplicationEventPublisher events;
 
-	public RoomService(RoomRepository rooms, DeviceRepository devices, PermissionService permissions) {
+	public RoomService(RoomRepository rooms, DeviceRepository devices, PermissionService permissions,
+			ApplicationEventPublisher events) {
 		this.rooms = rooms;
 		this.devices = devices;
 		this.permissions = permissions;
+		this.events = events;
 	}
 
 	public record RoomWithCount(Room room, long deviceCount) {
@@ -82,7 +89,9 @@ public class RoomService {
 		if (rooms.existsByNameIgnoreCase(trimmed)) {
 			throw nameTaken(trimmed);
 		}
-		return save(new Room(trimmed, validIcon(icon), rooms.nextSort()), trimmed);
+		var room = save(new Room(trimmed, validIcon(icon), rooms.nextSort()), trimmed);
+		events.publishEvent(new RoomChanged(room.getId(), true));
+		return room;
 	}
 
 	/** Null fields stay unchanged, except the icon: {@code clearIcon} removes it. */
@@ -106,6 +115,7 @@ public class RoomService {
 			room.setSort(sort);
 		}
 		save(room, room.getName());
+		events.publishEvent(new RoomChanged(id, false));
 		return new RoomWithCount(room, devices.countByRoomId(id));
 	}
 
@@ -124,6 +134,7 @@ public class RoomService {
 				room.setSort(i);
 			}
 		}
+		events.publishEvent(new RoomsReordered());
 	}
 
 	@Transactional
@@ -136,6 +147,7 @@ public class RoomService {
 		try {
 			rooms.delete(room);
 			rooms.flush();
+			events.publishEvent(new RoomDeleted(id));
 		}
 		catch (DataIntegrityViolationException e) {
 			// A device was put in the room in the meantime

@@ -80,7 +80,7 @@ public class RoomController {
 	public record RoomResponse(long id, String name, String icon, int sort, long deviceCount, Instant createdAt,
 			Instant updatedAt) {
 
-		static RoomResponse from(RoomWithCount r) {
+		public static RoomResponse from(RoomWithCount r) {
 			Room room = r.room();
 			return new RoomResponse(room.getId(), room.getName(), room.getIcon(), room.getSort(), r.deviceCount(),
 					room.getCreatedAt(), room.getUpdatedAt());

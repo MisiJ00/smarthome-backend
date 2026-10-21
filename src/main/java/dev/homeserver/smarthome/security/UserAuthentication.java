@@ -14,17 +14,28 @@ public class UserAuthentication extends AbstractAuthenticationToken {
 
 	private final CurrentUser user;
 	private final Jwt jwt;
+	private final Long apiTokenId;
 
 	/** A machine user signed in with an API token. */
-	public UserAuthentication(CurrentUser user) {
-		this(user, null);
+	public UserAuthentication(CurrentUser user, long apiTokenId) {
+		this(user, null, apiTokenId);
 	}
 
 	public UserAuthentication(CurrentUser user, Jwt jwt) {
+		this(user, jwt, null);
+	}
+
+	private UserAuthentication(CurrentUser user, Jwt jwt, Long apiTokenId) {
 		super(user.roles().stream().map(role -> new SimpleGrantedAuthority("ROLE_" + role)).toList());
 		this.user = user;
 		this.jwt = jwt;
+		this.apiTokenId = apiTokenId;
 		setAuthenticated(true);
+	}
+
+	/** The machine token used for this request, null for Kratos JWTs. */
+	public Long getApiTokenId() {
+		return apiTokenId;
 	}
 
 	@Override

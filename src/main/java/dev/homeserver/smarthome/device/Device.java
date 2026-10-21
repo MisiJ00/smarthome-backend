@@ -63,6 +63,22 @@ public class Device {
 		this.state = new HashMap<>(discovered.state());
 	}
 
+	/** A detached copy, e.g. to find out who could see the device before a change. */
+	public Device copy() {
+		var copy = new Device();
+		copy.id = id;
+		copy.name = name;
+		copy.roomId = roomId;
+		copy.type = type;
+		copy.adapter = adapter;
+		copy.externalId = externalId;
+		copy.capabilities = new HashMap<>(capabilities);
+		copy.state = new HashMap<>(state);
+		copy.lastSeen = lastSeen;
+		copy.lockedActions = new ArrayList<>(lockedActions);
+		return copy;
+	}
+
 	public void mergeState(Map<String, Object> update, Instant seenAt) {
 		var merged = new HashMap<>(state);
 		merged.putAll(update);

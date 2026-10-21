@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -18,6 +19,9 @@ import dev.homeserver.smarthome.audit.AuditService;
 import dev.homeserver.smarthome.audit.Via;
 import dev.homeserver.smarthome.confirmation.Confirmation;
 import dev.homeserver.smarthome.confirmation.ConfirmationService;
+import dev.homeserver.smarthome.events.LiveEvents.DeviceChanged;
+import dev.homeserver.smarthome.events.LiveEvents.DeviceRemoved;
+import dev.homeserver.smarthome.events.LiveEvents.DeviceStateUpdated;
 import dev.homeserver.smarthome.grant.Action;
 import dev.homeserver.smarthome.grant.PermissionService;
 import dev.homeserver.smarthome.grant.PermissionService.Access;
@@ -38,15 +42,18 @@ public class DeviceService {
 	private final ConfirmationService confirmations;
 	private final AuditService audit;
 	private final DeviceCommandSender sender;
+	private final ApplicationEventPublisher events;
 
 	public DeviceService(DeviceRepository devices, RoomRepository rooms, PermissionService permissions,
-			ConfirmationService confirmations, AuditService audit, DeviceCommandSender sender) {
+			ConfirmationService confirmations, AuditService audit, DeviceCommandSender sender,
+			ApplicationEventPublisher events) {
 		this.devices = devices;
 		this.rooms = rooms;
 		this.permissions = permissions;
 		this.confirmations = confirmations;
 		this.audit = audit;
 		this.sender = sender;
+		this.events = events;
 	}
 
 	/** What a command led to: sent to the device, or waiting for a confirmation. */
@@ -115,7 +122,9 @@ public class DeviceService {
 				.findFirst()
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
 						"Adapter " + adapter + " does not see device " + externalId));
-		return save(new Device(discovered, name, roomId));
+		var device = save(new Device(discovered, name, roomId));
+		events.publishEvent(new DeviceChanged(device.getId(), null));
+		return device;
 	}
 
 	/**
@@ -126,6 +135,7 @@ public class DeviceService {
 	public Device update(CurrentUser user, long id, String name, boolean setRoom, Long roomId,
 			List<String> lockedActions) {
 		var device = get(user, id);
+		var before = device.copy();
 		var access = permissions.accessOf(user);
 		if ((name != null || setRoom) && access.can(device, Action.CONFIGURE) != Decision.ALLOWED) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to configure " + device.getName());
@@ -145,12 +155,17 @@ public class DeviceService {
 		if (lockedActions != null) {
 			device.setLockedActions(lockedActions);
 		}
-		return save(device);
+		var saved = save(device);
+		events.publishEvent(new DeviceChanged(saved.getId(), before));
+		return saved;
 	}
 
 	@Transactional
 	public void remove(long id) {
-		devices.delete(get(id));
+		var device = get(id);
+		var snapshot = device.copy();
+		devices.delete(device);
+		events.publishEvent(new DeviceRemoved(snapshot));
 	}
 
 	/** What a command led to; the confirmation is set when one was created. */
@@ -197,8 +212,10 @@ public class DeviceService {
 	@EventListener
 	@Transactional
 	public void onStateChanged(DeviceStateChanged event) {
-		devices.findByAdapterAndExternalId(event.adapter(), event.externalId())
-				.ifPresent(device -> device.mergeState(event.state(), Instant.now()));
+		devices.findByAdapterAndExternalId(event.adapter(), event.externalId()).ifPresent(device -> {
+			device.mergeState(event.state(), Instant.now());
+			events.publishEvent(new DeviceStateUpdated(device.getId()));
+		});
 	}
 
 	private List<Device> visible(CurrentUser user, List<Device> candidates) {

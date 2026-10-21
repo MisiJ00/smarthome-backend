@@ -143,7 +143,7 @@ public class DeviceController {
 			List<String> lockedActions,
 			List<DevicePermission> permissions) {
 
-		static DeviceResponse from(Device d, Access access) {
+		public static DeviceResponse from(Device d, Access access) {
 			var permissions = access.permissions(d).stream()
 					.map(p -> new DevicePermission(p.action(), p.requiresConfirmation()))
 					.toList();

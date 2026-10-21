@@ -3,6 +3,7 @@ package dev.homeserver.smarthome.grant;
 import java.util.List;
 import java.util.Objects;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -10,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import dev.homeserver.smarthome.device.DeviceRepository;
+import dev.homeserver.smarthome.events.LiveEvents.PermissionsChanged;
 import dev.homeserver.smarthome.room.RoomRepository;
 import dev.homeserver.smarthome.user.RoleRepository;
 import dev.homeserver.smarthome.user.UserRepository;
@@ -23,14 +25,16 @@ public class GrantService {
 	private final UserRepository users;
 	private final RoomRepository rooms;
 	private final DeviceRepository devices;
+	private final ApplicationEventPublisher events;
 
 	public GrantService(GrantRepository grants, RoleRepository roles, UserRepository users, RoomRepository rooms,
-			DeviceRepository devices) {
+			DeviceRepository devices, ApplicationEventPublisher events) {
 		this.grants = grants;
 		this.roles = roles;
 		this.users = users;
 		this.rooms = rooms;
 		this.devices = devices;
+		this.events = events;
 	}
 
 	/** Filters are optional; a subject or scope id without its type matches nothing. */
@@ -82,7 +86,9 @@ public class GrantService {
 			throw conflict();
 		}
 		try {
-			return grants.saveAndFlush(new Grant(subjectType, subjectId, scopeType, scopeId, action, confirm));
+			var grant = grants.saveAndFlush(new Grant(subjectType, subjectId, scopeType, scopeId, action, confirm));
+			changed(grant);
+			return grant;
 		}
 		catch (DataIntegrityViolationException e) {
 			throw conflict();
@@ -96,12 +102,26 @@ public class GrantService {
 			throw badRequest("Unlocking always requires a confirmation");
 		}
 		grant.setRequiresConfirmation(requiresConfirmation);
+		changed(grant);
 		return grant;
 	}
 
 	@Transactional
 	public void delete(long id) {
-		grants.delete(get(id));
+		var grant = get(id);
+		grants.delete(grant);
+		changed(grant);
+	}
+
+	/** Tells live clients of the user, or of everyone with the role, that their permissions changed. */
+	private void changed(Grant grant) {
+		if (grant.getUserId() != null) {
+			events.publishEvent(new PermissionsChanged(grant.getUserId(), null));
+		}
+		else {
+			roles.findById(grant.getRoleId())
+					.ifPresent(role -> events.publishEvent(new PermissionsChanged(null, role.getName())));
+		}
 	}
 
 	private static ResponseStatusException badRequest(String message) {

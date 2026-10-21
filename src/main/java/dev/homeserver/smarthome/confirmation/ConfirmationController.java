@@ -19,13 +19,8 @@ import org.springframework.web.server.ResponseStatusException;
 import dev.homeserver.smarthome.audit.Via;
 import dev.homeserver.smarthome.confirmation.ConfirmationService.Challenge;
 import dev.homeserver.smarthome.confirmation.ConfirmationService.SignedApproval;
-import dev.homeserver.smarthome.device.Device;
-import dev.homeserver.smarthome.device.DeviceRepository;
 import dev.homeserver.smarthome.grant.Action;
-import dev.homeserver.smarthome.trusteddevice.TrustedDeviceService;
 import dev.homeserver.smarthome.user.CurrentUser;
-import dev.homeserver.smarthome.user.User;
-import dev.homeserver.smarthome.user.UserRepository;
 
 /**
  * Confirmations: everyone sees the requests they made and those they may decide (admins: all). Deciding needs a
@@ -37,16 +32,11 @@ import dev.homeserver.smarthome.user.UserRepository;
 public class ConfirmationController {
 
 	private final ConfirmationService service;
-	private final TrustedDeviceService trustedDevices;
-	private final UserRepository users;
-	private final DeviceRepository devices;
+	private final ConfirmationViews views;
 
-	public ConfirmationController(ConfirmationService service, TrustedDeviceService trustedDevices,
-			UserRepository users, DeviceRepository devices) {
+	public ConfirmationController(ConfirmationService service, ConfirmationViews views) {
 		this.service = service;
-		this.trustedDevices = trustedDevices;
-		this.users = users;
-		this.devices = devices;
+		this.views = views;
 	}
 
 	/** {@code status}: pending (default), approved, rejected, expired or all. Newest first. */
@@ -103,16 +93,7 @@ public class ConfirmationController {
 	}
 
 	private ConfirmationResponse response(CurrentUser me, Confirmation c) {
-		String userName = users.findById(c.getUserId()).map(User::getName).orElse(null);
-		String deviceName = devices.findById(c.getDeviceId()).map(Device::getName).orElse(null);
-		String decidedByName = c.getDecidedBy() == null ? null
-				: users.findById(c.getDecidedBy()).map(User::getName).orElse(null);
-		boolean pending = c.getStatus() == ConfirmationStatus.PENDING;
-		boolean canDecide = pending && service.canDecide(me, c);
-		boolean withPhone = pending && service.canApproveSigned(me, c) && trustedDevices.hasActive(me.id());
-		return new ConfirmationResponse(c.getId(), c.getUserId(), userName, c.getDeviceId(), deviceName, c.getAction(),
-				c.getParams(), c.getStatus(), c.getVia(), c.getCreatedAt(), c.getExpiresAt(), c.getDecidedBy(),
-				decidedByName, c.getDecidedAt(), c.getUserId() == me.id(), canDecide, withPhone);
+		return views.response(me, c);
 	}
 
 	private static ConfirmationStatus parseStatus(String status) {

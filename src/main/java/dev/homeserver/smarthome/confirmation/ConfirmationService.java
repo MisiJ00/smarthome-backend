@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -18,6 +19,7 @@ import dev.homeserver.smarthome.device.CommandGuard;
 import dev.homeserver.smarthome.device.Device;
 import dev.homeserver.smarthome.device.DeviceCommandSender;
 import dev.homeserver.smarthome.device.DeviceRepository;
+import dev.homeserver.smarthome.events.LiveEvents.ConfirmationChanged;
 import dev.homeserver.smarthome.grant.Action;
 import dev.homeserver.smarthome.grant.PermissionService;
 import dev.homeserver.smarthome.grant.PermissionService.Decision;
@@ -50,10 +52,12 @@ public class ConfirmationService {
 	private final ConfirmationProperties properties;
 	private final ChallengeStore challenges;
 	private final TrustedDeviceService trustedDevices;
+	private final ApplicationEventPublisher events;
 
 	public ConfirmationService(ConfirmationRepository confirmations, DeviceRepository devices, UserRepository users,
 			PermissionService permissions, DeviceCommandSender sender, AuditService audit,
-			ConfirmationProperties properties, ChallengeStore challenges, TrustedDeviceService trustedDevices) {
+			ConfirmationProperties properties, ChallengeStore challenges, TrustedDeviceService trustedDevices,
+			ApplicationEventPublisher events) {
 		this.confirmations = confirmations;
 		this.devices = devices;
 		this.users = users;
@@ -63,6 +67,7 @@ public class ConfirmationService {
 		this.properties = properties;
 		this.challenges = challenges;
 		this.trustedDevices = trustedDevices;
+		this.events = events;
 	}
 
 	/** What the phone sends along with a signed approval. */
@@ -118,6 +123,7 @@ public class ConfirmationService {
 		var confirmation = confirmations.save(new Confirmation(user.id(), device.getId(), action, command, via,
 				Instant.now().plus(properties.lifetime())));
 		audit.record(user, via, device, action.dbValue(), command, AuditResult.PENDING, confirmation.getId());
+		events.publishEvent(new ConfirmationChanged(confirmation.getId()));
 		return confirmation;
 	}
 
@@ -188,6 +194,7 @@ public class ConfirmationService {
 		}
 		audit.record(user, via, device, confirmation.getAction().dbValue(), params, AuditResult.APPROVED,
 				confirmation.getId());
+		events.publishEvent(new ConfirmationChanged(confirmation.getId()));
 		return confirmation;
 	}
 
@@ -199,6 +206,7 @@ public class ConfirmationService {
 		var requester = users.findById(confirmation.getUserId()).map(u -> CurrentUser.of(u, null)).orElse(null);
 		audit.record(user, via, device, confirmation.getAction().dbValue(), withRequester(confirmation, requester),
 				AuditResult.REJECTED, confirmation.getId());
+		events.publishEvent(new ConfirmationChanged(confirmation.getId()));
 		return confirmation;
 	}
 
@@ -226,6 +234,7 @@ public class ConfirmationService {
 			audit.record(requester, Via.SYSTEM, devices.findById(confirmation.getDeviceId()).orElse(null),
 					confirmation.getAction().dbValue(), confirmation.getParams(), AuditResult.EXPIRED,
 					confirmation.getId());
+			events.publishEvent(new ConfirmationChanged(confirmation.getId()));
 		}
 	}
 
@@ -255,7 +264,9 @@ public class ConfirmationService {
 		return confirmation;
 	}
 
-	private boolean isVisible(CurrentUser user, Confirmation confirmation) {
+	/** The requester, people who may decide, and admins see a confirmation. */
+	@Transactional(readOnly = true)
+	public boolean isVisible(CurrentUser user, Confirmation confirmation) {
 		return user.roles().contains(Role.ADMIN) || user.id() == confirmation.getUserId()
 				|| canDecide(user, confirmation);
 	}

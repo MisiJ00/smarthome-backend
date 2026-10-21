@@ -23,7 +23,7 @@ public class ApiTokenAuthenticationProvider implements AuthenticationProvider {
 			return null;
 		}
 		return tokens.authenticate(secret)
-				.map(UserAuthentication::new)
+				.map(login -> new UserAuthentication(login.user(), login.tokenId()))
 				.orElseThrow(() -> new InvalidBearerTokenException("Unknown API token"));
 	}
 

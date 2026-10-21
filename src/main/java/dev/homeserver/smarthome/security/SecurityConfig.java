@@ -40,6 +40,8 @@ public class SecurityConfig {
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers("/actuator/health", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 						.requestMatchers("/api/me").authenticated()
+						// The WebSocket handshake carries a one-time ticket instead of a token (checked in EventsConfig)
+						.requestMatchers(HttpMethod.GET, "/api/events").permitAll()
 						.requestMatchers(HttpMethod.GET, "/api/rooms", "/api/rooms/**").authenticated()
 						.requestMatchers("/api/rooms", "/api/rooms/**").hasRole(Role.ADMIN)
 						.requestMatchers("/api/devices/discovered").hasRole(Role.ADMIN)
