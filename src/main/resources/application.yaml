@@ -39,6 +39,14 @@ smarthome:
     ticket-lifetime: ${EVENTS_TICKET_LIFETIME:30s}
     max-connection-age: ${EVENTS_MAX_CONNECTION_AGE:1h}
     heartbeat: ${EVENTS_HEARTBEAT:30s}
+  ntfy:
+    # Push messages for approval requests; empty url (or secret) means no push
+    url: ${NTFY_URL:}
+    # Address of ntfy as the phones see it, shown for subscribing
+    public-url: ${NTFY_PUBLIC_URL:}
+    token: ${NTFY_TOKEN:}
+    # Each user's topic is derived from this; a new secret gives everyone new topics
+    topic-secret: ${NTFY_TOPIC_SECRET:}
   mqtt:
     url: ${MQTT_URL:tcp://localhost:1883}
     username: ${MQTT_USER:}
