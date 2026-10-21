@@ -48,6 +48,10 @@ smarthome:
     # How long to wait for Zigbee2MQTT to answer a bridge request (e.g. permit join)
     z2m-request-timeout: ${Z2M_REQUEST_TIMEOUT:5s}
 
+springdoc:
+  # Responses are JSON; without this the description says */*, which generated clients cannot type
+  default-produces-media-type: application/json
+
 management:
   endpoints:
     web:
