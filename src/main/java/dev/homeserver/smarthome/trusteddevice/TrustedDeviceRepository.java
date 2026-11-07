@@ -10,6 +10,8 @@ public interface TrustedDeviceRepository extends JpaRepository<TrustedDevice, Lo
 
 	boolean existsByPublicKey(String publicKey);
 
+	boolean existsByCredentialId(String credentialId);
+
 	boolean existsByUserIdAndRevokedAtIsNull(long userId);
 
 }

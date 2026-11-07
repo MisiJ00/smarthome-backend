@@ -54,6 +54,32 @@ public class TrustedDeviceController {
 		return ResponseEntity.created(location).body(TrustedDeviceResponse.from(device));
 	}
 
+	/**
+	 * Step 1 of registering this browser (WebAuthn): challenge, relying party and user for
+	 * {@code navigator.credentials.create}. Create the credential with {@code authenticatorAttachment: "platform"},
+	 * {@code userVerification: "required"} and ES256. Same conditions as for a phone (login at most 15 minutes old).
+	 */
+	@PostMapping("/api/me/trusted-devices/webauthn/challenge")
+	public TrustedDeviceService.WebAuthnOptions webauthnOptions(@AuthenticationPrincipal CurrentUser me,
+			Principal principal) {
+		return service.webauthnOptions(me, authTime(principal));
+	}
+
+	/**
+	 * Step 2: registers the credential the browser made ({@code clientDataJSON} and {@code attestationObject}, Base64 or
+	 * Base64url). The authenticator must have verified the user.
+	 */
+	@PostMapping("/api/me/trusted-devices/webauthn")
+	public ResponseEntity<TrustedDeviceResponse> registerWebAuthn(@AuthenticationPrincipal CurrentUser me, Principal principal,
+			@RequestHeader(name = Via.HEADER, required = false) String client,
+			@RequestBody WebAuthnRegisterRequest request) {
+		var device = service.registerWebAuthn(me, Via.of(me, client), authTime(principal), request.name(),
+				request.clientDataJson(), request.attestationObject());
+		var location = ServletUriComponentsBuilder.fromCurrentContextPath().path("/api/me/trusted-devices/{id}")
+				.buildAndExpand(device.getId()).toUri();
+		return ResponseEntity.created(location).body(TrustedDeviceResponse.from(device));
+	}
+
 	/** Revokes one of the caller's phones; it can no longer sign approvals. */
 	@DeleteMapping("/api/me/trusted-devices/{id}")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
@@ -79,12 +105,19 @@ public class TrustedDeviceController {
 	public record RegisterRequest(String name, String publicKey) {
 	}
 
-	public record TrustedDeviceResponse(long id, String name, Instant createdAt, Instant lastUsed, Instant revokedAt,
-			boolean active) {
+	public record WebAuthnRegisterRequest(String name, String clientDataJson, String attestationObject) {
+	}
+
+	/**
+	 * @param kind         {@code key} (a phone) or {@code webauthn} (a browser passkey)
+	 * @param credentialId Base64url, only for {@code webauthn}: what the browser passes as allowCredentials when signing
+	 */
+	public record TrustedDeviceResponse(long id, String name, String kind, String credentialId, Instant createdAt,
+			Instant lastUsed, Instant revokedAt, boolean active) {
 
 		static TrustedDeviceResponse from(TrustedDevice d) {
-			return new TrustedDeviceResponse(d.getId(), d.getName(), d.getCreatedAt(), d.getLastUsed(), d.getRevokedAt(),
-					!d.isRevoked());
+			return new TrustedDeviceResponse(d.getId(), d.getName(), d.getKind(), d.getCredentialId(), d.getCreatedAt(),
+					d.getLastUsed(), d.getRevokedAt(), !d.isRevoked());
 		}
 
 	}

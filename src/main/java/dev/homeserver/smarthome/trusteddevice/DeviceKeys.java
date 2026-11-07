@@ -58,6 +58,11 @@ final class DeviceKeys {
 		}
 	}
 
+	/** The key of a stored (normalized) Base64 SubjectPublicKeyInfo. */
+	static ECPublicKey publicKey(String spkiBase64) {
+		return fromSpki(Base64.getDecoder().decode(spkiBase64));
+	}
+
 	private static ECPublicKey fromSpki(byte[] bytes) {
 		try {
 			var key = KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(bytes));

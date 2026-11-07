@@ -71,8 +71,13 @@ public class ConfirmationService {
 		this.events = events;
 	}
 
-	/** What the phone sends along with a signed approval. */
-	public record SignedApproval(long trustedDeviceId, String nonce, String signature) {
+	/**
+	 * What the phone or browser sends along with a signed approval. {@code authenticatorData} and {@code clientDataJson}
+	 * (Base64 or Base64url) only for a browser passkey, where the signature is a WebAuthn assertion over the
+	 * SHA-256 of the {@link #payload}.
+	 */
+	public record SignedApproval(long trustedDeviceId, String nonce, String signature, String authenticatorData,
+			String clientDataJson) {
 	}
 
 	/** A challenge and the exact text the phone has to sign. */
@@ -80,7 +85,7 @@ public class ConfirmationService {
 	}
 
 	/**
-	 * The text a phone signs (UTF-8, SHA256withECDSA): binds the signature to this confirmation, its action and
+	 * The text a phone signs (UTF-8, SHA256withECDSA; a browser passkey signs its SHA-256 as WebAuthn challenge): binds the signature to this confirmation, its action and
 	 * device, and one nonce.
 	 */
 	public static String payload(Confirmation confirmation, String nonce) {
@@ -184,7 +189,7 @@ public class ConfirmationService {
 				requireDecide(user, confirmation);
 			}
 			phone = trustedDevices.verify(user.id(), signed.trustedDeviceId(), payload(confirmation, signed.nonce()),
-					signed.signature()).getName();
+					signed.signature(), signed.authenticatorData(), signed.clientDataJson()).getName();
 		}
 		Device device = devices.findById(confirmation.getDeviceId()).orElseThrow(() -> notFound(id));
 		// Things may have changed since the request

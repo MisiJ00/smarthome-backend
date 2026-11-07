@@ -34,6 +34,12 @@ smarthome:
     max-auth-age: ${TRUSTED_DEVICE_MAX_AUTH_AGE:15m}
     # How long a phone has to sign a challenge
     challenge-lifetime: ${TRUSTED_DEVICE_CHALLENGE_LIFETIME:60s}
+  webauthn:
+    # The web interface as WebAuthn relying party (browser passkeys as trusted devices): host name without port,
+    # and its addresses as the browser reports them (comma separated). Must match Kratos's passkey config.
+    rp-id: ${WEBAUTHN_RP_ID:localhost}
+    rp-name: ${WEBAUTHN_RP_NAME:Smart Home}
+    origins: ${WEBAUTHN_ORIGINS:http://localhost:5173}
   events:
     # Live updates (/api/events): ticket validity, maximum connection age, ping and recheck interval
     ticket-lifetime: ${EVENTS_TICKET_LIFETIME:30s}

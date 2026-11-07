@@ -17,6 +17,9 @@ import jakarta.persistence.Table;
 @Table(name = "trusted_devices")
 public class TrustedDevice {
 
+	public static final String KIND_KEY = "key";
+	public static final String KIND_WEBAUTHN = "webauthn";
+
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
@@ -29,6 +32,16 @@ public class TrustedDevice {
 	/** Base64 X.509 SubjectPublicKeyInfo of an EC P-256 key. */
 	@Column(name = "public_key")
 	private String publicKey;
+
+	/** {@code key}: a phone's key in the Secure Enclave / Keystore; {@code webauthn}: a browser's passkey. */
+	private String kind = KIND_KEY;
+
+	/** Base64url credential id, only for {@code webauthn}. */
+	@Column(name = "credential_id")
+	private String credentialId;
+
+	@Column(name = "sign_count")
+	private long signCount;
 
 	@Column(name = "created_at", updatable = false)
 	private Instant createdAt;
@@ -49,6 +62,18 @@ public class TrustedDevice {
 		this.createdAt = Instant.now();
 	}
 
+	static TrustedDevice webauthn(long userId, String name, String publicKey, String credentialId, long signCount) {
+		var device = new TrustedDevice(userId, name, publicKey);
+		device.kind = KIND_WEBAUTHN;
+		device.credentialId = credentialId;
+		device.signCount = signCount;
+		return device;
+	}
+
+	void signCount(long value) {
+		signCount = value;
+	}
+
 	void revoke() {
 		if (revokedAt == null) {
 			revokedAt = Instant.now();
@@ -57,6 +82,22 @@ public class TrustedDevice {
 
 	void used() {
 		lastUsed = Instant.now();
+	}
+
+	public boolean isWebauthn() {
+		return KIND_WEBAUTHN.equals(kind);
+	}
+
+	public String getKind() {
+		return kind;
+	}
+
+	public String getCredentialId() {
+		return credentialId;
+	}
+
+	public long getSignCount() {
+		return signCount;
 	}
 
 	public boolean isRevoked() {
