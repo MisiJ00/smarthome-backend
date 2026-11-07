@@ -26,6 +26,7 @@ import dev.homeserver.smarthome.events.LiveEvents.RoomDeleted;
 import dev.homeserver.smarthome.events.LiveEvents.RoomsReordered;
 import dev.homeserver.smarthome.events.LiveEvents.TokenRevoked;
 import dev.homeserver.smarthome.events.LiveEvents.UserAccessEnded;
+import dev.homeserver.smarthome.events.LiveEvents.WidgetsChanged;
 import dev.homeserver.smarthome.room.RoomController.RoomResponse;
 import dev.homeserver.smarthome.room.RoomService;
 import dev.homeserver.smarthome.room.RoomService.RoomWithCount;
@@ -129,6 +130,16 @@ public class EventBroadcaster {
 		for (Connection c : hub.connections()) {
 			var ids = rooms.list(c.user()).stream().map(r -> r.room().getId()).toList();
 			hub.send(c, "rooms.reordered", Map.of("roomIds", ids));
+		}
+	}
+
+	/** Only the user's own connections hear about their widgets. */
+	@TransactionalEventListener(fallbackExecution = true)
+	public void on(WidgetsChanged event) {
+		for (Connection c : hub.connections()) {
+			if (c.user().id() == event.userId()) {
+				hub.send(c, "widgets.changed", Map.of());
+			}
 		}
 	}
 

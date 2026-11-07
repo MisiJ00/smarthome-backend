@@ -293,6 +293,22 @@ class LiveEventsTest {
 
 	}
 
+	@Test
+	void widgetChangesReachOnlyTheirOwner() throws Exception {
+		String erikaToken = person("bewohner");
+		var erika = connect(erikaToken);
+		var erikaPhone = connect(erikaToken);
+		var max = connect(person("bewohner"));
+
+		as(erikaToken, post("/api/me/widgets").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"kind\": \"switch\", \"targetType\": \"device\", \"targetId\": " + lamp.getId() + "}"))
+				.andExpect(status().isCreated());
+		// Every client of the owner refreshes its widgets, nobody else is told
+		erika.await("widgets.changed", m -> true);
+		erikaPhone.await("widgets.changed", m -> true);
+		max.assertNone("widgets.changed");
+	}
+
 	private Client connect(String bearer) throws Exception {
 		var client = open(ticket(bearer));
 		client.await("hello", m -> true);

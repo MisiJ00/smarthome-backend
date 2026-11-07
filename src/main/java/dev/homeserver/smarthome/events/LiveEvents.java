@@ -55,6 +55,10 @@ public final class LiveEvents {
 	public record PairingChanged(String adapter, boolean active, Instant endsAt) {
 	}
 
+	/** The user's own widgets were created, changed, reordered or deleted (other clients of theirs refresh). */
+	public record WidgetsChanged(long userId) {
+	}
+
 	/** An adapter sees a device it did not see before, i.e. one that was just paired. */
 	public record DeviceDiscovered(DiscoveredDevice device) {
 	}
