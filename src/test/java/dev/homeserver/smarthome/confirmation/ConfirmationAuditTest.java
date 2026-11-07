@@ -85,46 +85,63 @@ class ConfirmationAuditTest {
 	}
 
 	@Test
-	void anotherResidentApprovesAndTheDoorOpens() throws Exception {
+	void aPersonsRequestOnlyTheyApproveAndMayWithdraw() throws Exception {
 		long id = requestUnlock(erika, "app");
+		String approve = "/api/confirmations/" + id + "/approve";
+		String reject = "/api/confirmations/" + id + "/reject";
 
-		// Erika sees her request but cannot approve it herself
+		// Erika sees her request; without the signature of her phone she cannot approve it
 		as(erika, get("/api/confirmations"))
 				.andExpect(jsonPath("$[?(@.id == " + id + ")].mine", contains(true)))
 				.andExpect(jsonPath("$[?(@.id == " + id + ")].canDecide", contains(false)));
-		as(erika, post("/api/confirmations/" + id + "/approve")).andExpect(status().isForbidden());
+		as(erika, post(approve)).andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.code").value("confirmation.own_request"));
 
-		// The AI and guests never decide, they do not even see it
-		as(aiToken(), post("/api/confirmations/" + id + "/approve")).andExpect(status().isNotFound());
-		String guest = personWithRoles("Gast", "gast");
-		as(guest, get("/api/confirmations")).andExpect(jsonPath("$[*].id", not(hasItem((int) id))));
-		as(guest, post("/api/confirmations/" + id + "/approve")).andExpect(status().isNotFound());
-		assertThat(adapter.sentTo(door.getExternalId())).isEmpty();
-
-		as(max, get("/api/confirmations/" + id))
+		// Nobody else decides a person's request: other residents do not even see it, admins see it but may not
+		as(max, get("/api/confirmations")).andExpect(jsonPath("$[*].id", not(hasItem((int) id))));
+		as(max, post(approve)).andExpect(status().isNotFound());
+		as(ADMIN, get("/api/confirmations/" + id))
 				.andExpect(jsonPath("$.userName").value("Erika"))
 				.andExpect(jsonPath("$.deviceName").value(door.getName()))
 				.andExpect(jsonPath("$.action").value("unlock"))
 				.andExpect(jsonPath("$.params.state").value("UNLOCK"))
-				.andExpect(jsonPath("$.canDecide").value(true));
-		as(max, post("/api/confirmations/" + id + "/approve").header(Via.HEADER, "web"))
+				.andExpect(jsonPath("$.canDecide").value(false))
+				.andExpect(jsonPath("$.canApproveWithPhone").value(false));
+		as(ADMIN, post(approve)).andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.code").value("confirmation.person_request"));
+		as(ADMIN, post(reject)).andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.code").value("confirmation.person_request"));
+		as(ADMIN, post("/api/confirmations/" + id + "/challenge")).andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.code").value("confirmation.person_request"));
+		// A signed approval of someone else's request fails as well (no challenge of theirs exists for it)
+		as(ADMIN, post(approve).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"trustedDeviceId\": 1, \"nonce\": \"x\", \"signature\": \"x\"}"))
+				.andExpect(status().isForbidden());
+
+		// The AI and guests never decide, they do not even see it
+		as(aiToken(), post(approve)).andExpect(status().isNotFound());
+		String guest = personWithRoles("Gast", "gast");
+		as(guest, get("/api/confirmations")).andExpect(jsonPath("$[*].id", not(hasItem((int) id))));
+		as(guest, post(approve)).andExpect(status().isNotFound());
+		assertThat(adapter.sentTo(door.getExternalId())).isEmpty();
+
+		// Erika withdraws it (e.g. she cancelled the fingerprint): rejected by herself
+		as(erika, post(reject).header(Via.HEADER, "app"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.status").value("approved"))
-				.andExpect(jsonPath("$.decidedByName").value("Max"));
-		assertThat(adapter.sentTo(door.getExternalId())).containsExactly(Map.of("state", "UNLOCK"));
+				.andExpect(jsonPath("$.status").value("rejected"))
+				.andExpect(jsonPath("$.decidedByName").value("Erika"));
+		as(erika, post(reject)).andExpect(status().isConflict());
+		assertThat(adapter.sentTo(door.getExternalId())).isEmpty();
 
-		as(max, post("/api/confirmations/" + id + "/approve")).andExpect(status().isConflict());
-		as(erika, get("/api/confirmations")).andExpect(jsonPath("$[*].id", not(hasItem((int) id))));
-		as(erika, get("/api/confirmations").param("status", "approved")).andExpect(jsonPath("$[*].id", hasItem((int) id)));
-
-		// Audit: request (Erika, app, pending) and approval (Max, web, approved), newest first
+		// Audit: request and withdrawal, both by Erika over the app, newest first
 		as(ADMIN, get("/api/audit").param("deviceId", String.valueOf(door.getId())))
 				.andExpect(jsonPath("$.total").value(2))
-				.andExpect(jsonPath("$.items[*].result", contains("approved", "pending")))
-				.andExpect(jsonPath("$.items[*].userName", contains("Max", "Erika")))
-				.andExpect(jsonPath("$.items[*].via", contains("web", "app")))
+				.andExpect(jsonPath("$.items[*].result", contains("rejected", "pending")))
+				.andExpect(jsonPath("$.items[*].userName", contains("Erika", "Erika")))
+				.andExpect(jsonPath("$.items[*].via", contains("app", "app")))
 				.andExpect(jsonPath("$.items[*].confirmationId", contains((int) id, (int) id)))
-				.andExpect(jsonPath("$.items[0].params.requestedBy").value("Erika"));
+				.andExpect(jsonPath("$.items[0].params.requestedBy").value("Erika"))
+				.andExpect(jsonPath("$.items[0].params.withdrawn").value(true));
 	}
 
 	@Test
@@ -148,12 +165,28 @@ class ConfirmationAuditTest {
 	}
 
 	@Test
+	void aDeactivatedMachineCannotHaveItsRequestApproved() throws Exception {
+		long id = requestUnlock(aiToken(), null);
+		long ki = users.findAll().stream().filter(u -> u.isMachine() && u.hasRole(Role.KI)).findFirst().orElseThrow().getId();
+		jdbc.update("UPDATE users SET is_active = FALSE WHERE id = ?", ki);
+		try {
+			as(max, post("/api/confirmations/" + id + "/approve")).andExpect(status().isConflict())
+					.andExpect(jsonPath("$.code").value("confirmation.requester_inactive"));
+			assertThat(adapter.sentTo(door.getExternalId())).isEmpty();
+			as(max, get("/api/confirmations/" + id)).andExpect(jsonPath("$.status").value("pending"));
+		}
+		finally {
+			jdbc.update("UPDATE users SET is_active = TRUE WHERE id = ?", ki);
+		}
+	}
+
+	@Test
 	void unansweredRequestsExpire() throws Exception {
 		long id = requestUnlock(erika, null);
 		jdbc.update("UPDATE confirmations SET expires_at = now() - interval '1 minute' WHERE id = ?", id);
 		confirmations.expireDue();
 
-		as(max, post("/api/confirmations/" + id + "/approve")).andExpect(status().isConflict());
+		as(ADMIN, post("/api/confirmations/" + id + "/approve")).andExpect(status().isConflict());
 		as(erika, get("/api/confirmations/" + id)).andExpect(jsonPath("$.status").value("expired"));
 		as(ADMIN, get("/api/audit").param("deviceId", String.valueOf(door.getId())).param("result", "expired"))
 				.andExpect(jsonPath("$.items[*].via", contains("system")))
@@ -163,7 +196,8 @@ class ConfirmationAuditTest {
 
 	@Test
 	void lockingTheActionInTheMeantimeBlocksTheApproval() throws Exception {
-		long id = requestUnlock(erika, null);
+		// a request of the AI, so that another person decides
+		long id = requestUnlock(aiToken(), null);
 		as(ADMIN, patch("/api/devices/" + door.getId()).contentType(MediaType.APPLICATION_JSON)
 				.content("{\"lockedActions\": [\"unlock\"]}"))
 				.andExpect(status().isOk());

@@ -139,9 +139,8 @@ class TrustedDeviceTest {
 		var second = challenge(erika.jwt(), confirmation);
 		approve(erika.jwt(), confirmation, maxPhoneId, second.nonce(), sign(maxPhone, second.payload()))
 				.andExpect(status().isForbidden());
-		var maxChallenge = challenge(max.jwt(), confirmation);
-		approve(erika.jwt(), confirmation, phoneId, maxChallenge.nonce(), sign(phone, maxChallenge.payload()))
-				.andExpect(status().isForbidden());
+		// Max gets no challenge for Erika's request: only she approves it
+		as(max.jwt(), post("/api/confirmations/" + confirmation + "/challenge")).andExpect(status().isNotFound());
 
 		// Signature for a different text (other confirmation id)
 		var third = challenge(erika.jwt(), confirmation);
@@ -153,18 +152,19 @@ class TrustedDeviceTest {
 		// Revoked phone
 		as(erika.jwt(), delete("/api/me/trusted-devices/" + phoneId)).andExpect(status().isNoContent());
 		as(erika.jwt(), post("/api/confirmations/" + confirmation + "/challenge")).andExpect(status().isConflict());
-		long newPhone = id(register(erika.jwt(), "Neues Handy", spki(keyPair())).andReturn().getResponse()
+		KeyPair newKey = keyPair();
+		long newPhone = id(register(erika.jwt(), "Neues Handy", spki(newKey)).andReturn().getResponse()
 				.getContentAsString());
 		var fourth = challenge(erika.jwt(), confirmation);
 		approve(erika.jwt(), confirmation, phoneId, fourth.nonce(), sign(phone, fourth.payload()))
 				.andExpect(status().isForbidden());
 		assertThat(newPhone).isNotEqualTo(phoneId);
 
-		// Max may decide anyway, and with his phone it works too; replaying his approval does not
-		var maxSecond = challenge(max.jwt(), confirmation);
-		String signature = sign(maxPhone, maxSecond.payload());
-		approve(max.jwt(), confirmation, maxPhoneId, maxSecond.nonce(), signature).andExpect(status().isOk());
-		approve(max.jwt(), confirmation, maxPhoneId, maxSecond.nonce(), signature).andExpect(status().isForbidden());
+		// With her new phone it works; replaying that approval does not
+		var fifth = challenge(erika.jwt(), confirmation);
+		String signature = sign(newKey, fifth.payload());
+		approve(erika.jwt(), confirmation, newPhone, fifth.nonce(), signature).andExpect(status().isOk());
+		approve(erika.jwt(), confirmation, newPhone, fifth.nonce(), signature).andExpect(status().isForbidden());
 		assertThat(adapter.sentTo(door.getExternalId())).containsExactly(Map.of("state", "UNLOCK"));
 	}
 

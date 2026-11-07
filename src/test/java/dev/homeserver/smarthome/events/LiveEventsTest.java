@@ -180,7 +180,7 @@ class LiveEventsTest {
 	}
 
 	@Test
-	void confirmationsReachTheRequesterAndThoseWhoMayDecide() throws Exception {
+	void aPersonsConfirmationsReachOnlyThemselves() throws Exception {
 		String erikaToken = person("bewohner");
 		var erika = connect(erikaToken);
 		String maxToken = person("bewohner");
@@ -195,14 +195,14 @@ class LiveEventsTest {
 
 		var own = erika.await("confirmation.created", isIt);
 		assertThat(JsonPath.<Boolean>read(own, "$.data.mine")).isTrue();
-		var forMax = max.await("confirmation.created", isIt);
-		assertThat(JsonPath.<Boolean>read(forMax, "$.data.canDecide")).isTrue();
+		// only Erika approves her request (with her phone), so nobody else hears of it
+		max.assertNone("confirmation.created");
 		guest.assertNone("confirmation.created");
 
-		as(maxToken, post("/api/confirmations/" + id + "/approve")).andExpect(status().isOk());
-		erika.await("confirmation.approved", isIt);
-		max.await("confirmation.approved", isIt);
-		guest.assertNone("confirmation.approved");
+		// she withdraws it
+		as(erikaToken, post("/api/confirmations/" + id + "/reject")).andExpect(status().isOk());
+		erika.await("confirmation.rejected", isIt);
+		max.assertNone("confirmation.rejected");
 	}
 
 	@Test

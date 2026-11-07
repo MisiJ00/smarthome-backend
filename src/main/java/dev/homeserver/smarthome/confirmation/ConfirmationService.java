@@ -31,13 +31,15 @@ import dev.homeserver.smarthome.user.UserRepository;
  * Commands that need a confirmation (always unlocking, otherwise grants with {@code requires_confirmation}) wait here
  * until someone approves or rejects them, or they expire.
  *
- * <p>Who may decide: a person (never the AI or a script), never the one who asked, and only an admin or someone who
- * may do the same action on the device themselves (with or without confirmation). Approving sends the command, after
- * checking locked actions and the requester's permission again.
+ * <p>A person's request only that person approves, signed with their phone: they get a one-time challenge, sign it
+ * on the phone (the key only works with Face ID or a fingerprint) and send the signature with the approval. Nobody
+ * else, not even an admin, approves or rejects it; the person may withdraw it (stored as rejected by themselves).
  *
- * <p>Signed approvals: a person with a registered phone gets a one-time challenge, signs it on the phone (the key only
- * works with Face ID or a fingerprint) and sends the signature with the approval. Signed, people may also approve
- * their own requests. The AI has no phone and never approves.
+ * <p>Requests of the AI or a script (machine users, no person behind them) are decided by people: an admin or someone
+ * who may do the same action on the device themselves (with or without confirmation), with or without a phone.
+ * Machines never decide.
+ *
+ * <p>Approving sends the command, after checking locked actions and the requester's permission again.
  */
 @Service
 public class ConfirmationService {
@@ -95,7 +97,7 @@ public class ConfirmationService {
 					.with("status", confirmation.getStatus().dbValue());
 		}
 		if (!canApproveSigned(user, confirmation)) {
-			throw ApiException.forbidden("confirmation.not_allowed", "Du darfst über diese Anfrage nicht entscheiden.");
+			requireDecide(user, confirmation);
 		}
 		if (!trustedDevices.hasActive(user.id())) {
 			throw ApiException.conflict("phone.none", "Bitte zuerst dieses Handy für Freigaben registrieren.");
@@ -105,15 +107,21 @@ public class ConfirmationService {
 	}
 
 	/**
-	 * Whether the user may approve this confirmation with a signature from a phone: like {@link #canDecide}, but their
-	 * own requests count too. Ignores the status and whether a phone is registered.
+	 * Whether the user may approve this confirmation with a signature from a phone: a person their own request, and
+	 * requests of machines whoever may {@link #canDecide decide} them. Ignores the status and whether a phone is
+	 * registered.
 	 */
 	@Transactional(readOnly = true)
 	public boolean canApproveSigned(CurrentUser user, Confirmation confirmation) {
 		if (user.identityId() == null) {
 			return false;
 		}
-		return user.id() == confirmation.getUserId() || canDecide(user, confirmation);
+		return user.id() == confirmation.getUserId() ? requestedByPerson(confirmation) : canDecide(user, confirmation);
+	}
+
+	/** Whether the user may withdraw this confirmation: their own request (ignoring its status). */
+	public boolean canWithdraw(CurrentUser user, Confirmation confirmation) {
+		return user.identityId() != null && user.id() == confirmation.getUserId();
 	}
 
 	/** Creates a pending confirmation for a command that was not sent. */
@@ -173,7 +181,7 @@ public class ConfirmationService {
 			challenges.consume(id, user.id(), signed.nonce());
 			confirmation = pending(user, id);
 			if (!canApproveSigned(user, confirmation)) {
-				throw ApiException.forbidden("confirmation.not_allowed", "Du darfst über diese Anfrage nicht entscheiden.");
+				requireDecide(user, confirmation);
 			}
 			phone = trustedDevices.verify(user.id(), signed.trustedDeviceId(), payload(confirmation, signed.nonce()),
 					signed.signature()).getName();
@@ -181,7 +189,13 @@ public class ConfirmationService {
 		Device device = devices.findById(confirmation.getDeviceId()).orElseThrow(() -> notFound(id));
 		// Things may have changed since the request
 		CommandGuard.check(device, confirmation.getParams());
-		var requester = users.findById(confirmation.getUserId()).map(u -> CurrentUser.of(u, null)).orElseThrow();
+		// The requester may be gone or deactivated (e.g. a machine whose token was revoked) since the request
+		var requesterUser = users.findById(confirmation.getUserId()).orElseThrow(() -> ApiException
+				.conflict("confirmation.requester_gone", "Wer gefragt hat, gibt es nicht mehr."));
+		if (!requesterUser.isActive()) {
+			throw ApiException.conflict("confirmation.requester_inactive", "Wer gefragt hat, ist deaktiviert.");
+		}
+		var requester = CurrentUser.of(requesterUser, null);
 		if (permissions.can(requester, device, confirmation.getAction()) == Decision.DENIED) {
 			throw ApiException.conflict("confirmation.requester_not_allowed",
 					"Wer gefragt hat, darf das inzwischen nicht mehr.");
@@ -198,22 +212,37 @@ public class ConfirmationService {
 		return confirmation;
 	}
 
+	/**
+	 * Rejects a machine's request (whoever may decide it) or withdraws an own request (the person who asked; stored
+	 * as rejected by them, e.g. when they cancel the fingerprint). 409 if no longer pending, 403 otherwise.
+	 */
 	@Transactional
 	public Confirmation reject(CurrentUser user, Via via, long id) {
-		var confirmation = pendingForDecision(user, id);
+		var confirmation = pending(user, id);
+		if (!canWithdraw(user, confirmation)) {
+			requireDecide(user, confirmation);
+		}
 		Device device = devices.findById(confirmation.getDeviceId()).orElse(null);
 		confirmation.decide(ConfirmationStatus.REJECTED, user.id());
 		var requester = users.findById(confirmation.getUserId()).map(u -> CurrentUser.of(u, null)).orElse(null);
-		audit.record(user, via, device, confirmation.getAction().dbValue(), withRequester(confirmation, requester),
-				AuditResult.REJECTED, confirmation.getId());
+		var params = withRequester(confirmation, requester);
+		if (canWithdraw(user, confirmation)) {
+			// the requester themselves: withdrawn, not refused by someone
+			params.put("withdrawn", true);
+		}
+		audit.record(user, via, device, confirmation.getAction().dbValue(), params, AuditResult.REJECTED,
+				confirmation.getId());
 		events.publishEvent(new ConfirmationChanged(confirmation.getId()));
 		return confirmation;
 	}
 
-	/** Whether the user may approve or reject this confirmation (ignoring its status). */
+	/**
+	 * Whether the user may approve or reject this confirmation without a phone (ignoring its status): only requests of
+	 * machines, and only people other than the requester who are admins or may do the action themselves.
+	 */
 	@Transactional(readOnly = true)
 	public boolean canDecide(CurrentUser user, Confirmation confirmation) {
-		if (user.identityId() == null || user.id() == confirmation.getUserId()) {
+		if (user.identityId() == null || user.id() == confirmation.getUserId() || requestedByPerson(confirmation)) {
 			return false;
 		}
 		if (user.roles().contains(Role.ADMIN)) {
@@ -238,15 +267,31 @@ public class ConfirmationService {
 		}
 	}
 
+	/** Whether a person (not the AI or a script) asked; then only they approve it, with their phone. */
+	@Transactional(readOnly = true)
+	public boolean requestedByPerson(Confirmation confirmation) {
+		return users.findById(confirmation.getUserId()).map(u -> !u.isMachine()).orElse(false);
+	}
+
 	private Confirmation pendingForDecision(CurrentUser user, long id) {
 		var confirmation = pending(user, id);
-		if (!canDecide(user, confirmation)) {
-			throw user.id() == confirmation.getUserId()
-					? ApiException.forbidden("confirmation.own_request",
-							"Die eigene Anfrage kannst du nur mit einem registrierten Handy freigeben.")
-					: ApiException.forbidden("confirmation.not_allowed", "Du darfst über diese Anfrage nicht entscheiden.");
-		}
+		requireDecide(user, confirmation);
 		return confirmation;
+	}
+
+	private void requireDecide(CurrentUser user, Confirmation confirmation) {
+		if (canDecide(user, confirmation)) {
+			return;
+		}
+		if (user.id() == confirmation.getUserId()) {
+			throw ApiException.forbidden("confirmation.own_request",
+					"Die eigene Anfrage kannst du nur mit deinem registrierten Handy freigeben.");
+		}
+		if (requestedByPerson(confirmation)) {
+			throw ApiException.forbidden("confirmation.person_request",
+					"Diese Anfrage kann nur die Person freigeben, die sie gestellt hat, mit ihrem Handy.");
+		}
+		throw ApiException.forbidden("confirmation.not_allowed", "Du darfst über diese Anfrage nicht entscheiden.");
 	}
 
 	/** Locked for the rest of the transaction; 404 if not visible, 409 if no longer pending. */

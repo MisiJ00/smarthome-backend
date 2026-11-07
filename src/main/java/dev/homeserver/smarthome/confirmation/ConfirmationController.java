@@ -61,8 +61,8 @@ public class ConfirmationController {
 	}
 
 	/**
-	 * Sends the command. Without a body the usual rules apply (another person decides); with
-	 * {@code {trustedDeviceId, nonce, signature}} from a registered phone people may also approve their own request.
+	 * Sends the command. A person's request only they approve, with {@code {trustedDeviceId, nonce, signature}} from
+	 * their registered phone; a machine's request (AI, script) another person who may decide, with or without a phone.
 	 * 409 if already decided or expired, 403 if the caller may not decide or the signature is invalid.
 	 */
 	@PostMapping("/{id}/approve")
@@ -72,6 +72,7 @@ public class ConfirmationController {
 		return response(me, service.approve(me, Via.of(me, client), id, signed));
 	}
 
+	/** Rejects a machine's request, or withdraws the caller's own request (stored as rejected by them). */
 	@PostMapping("/{id}/reject")
 	public ConfirmationResponse reject(@AuthenticationPrincipal CurrentUser me, @PathVariable long id,
 			@RequestHeader(name = Via.HEADER, required = false) String client) {
@@ -81,9 +82,9 @@ public class ConfirmationController {
 	/**
 	 * @param params    the command that is sent once approved
 	 * @param mine      the caller asked for it
-	 * @param canDecide the caller may approve or reject it (while it is pending)
-	 * @param canApproveWithPhone the caller may approve it with a signature from a registered phone, their own
-	 * request included (while it is pending)
+	 * @param canDecide the caller may approve or reject it without a phone (only requests of machines, while pending)
+	 * @param canApproveWithPhone the caller may approve it with a signature from their registered phone: their own
+	 * request, or a machine's they may decide (while it is pending)
 	 */
 	public record ConfirmationResponse(long id, long userId, String userName, long deviceId, String deviceName,
 			Action action, Map<String, Object> params, ConfirmationStatus status, Via via, Instant createdAt,
