@@ -46,7 +46,15 @@ public enum AuditResult {
 
 	/** Pairing mode was closed. */
 	@JsonProperty("stopped")
-	STOPPED;
+	STOPPED,
+
+	/** A sign-in, consent or logout for another service (SSO) was accepted. */
+	@JsonProperty("accepted")
+	ACCEPTED,
+
+	/** The question was not asked (consent for a trusted service). */
+	@JsonProperty("skipped")
+	SKIPPED;
 
 	public String dbValue() {
 		return name().toLowerCase();

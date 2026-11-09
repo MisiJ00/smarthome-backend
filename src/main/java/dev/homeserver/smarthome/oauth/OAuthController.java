@@ -9,10 +9,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import dev.homeserver.smarthome.audit.Via;
 import dev.homeserver.smarthome.oauth.OAuthService.ConsentView;
 import dev.homeserver.smarthome.oauth.OAuthService.LogoutView;
 import dev.homeserver.smarthome.security.UserAuthentication;
@@ -38,24 +40,27 @@ public class OAuthController {
 	/** The person is signed in with Kratos: Hydra's login request is accepted (or rejected for a deactivated account). */
 	@PostMapping("/login")
 	public Redirect login(@AuthenticationPrincipal CurrentUser me, Principal principal,
-			@Valid @RequestBody ChallengeRequest request) {
-		return new Redirect(service.login(me, aal(principal), request.challenge()));
+			@RequestHeader(name = Via.HEADER, required = false) String client, @Valid @RequestBody ChallengeRequest request) {
+		return new Redirect(service.login(me, Via.of(me, client), aal(principal), request.challenge()));
 	}
 
 	/** What to ask the person; {@code redirectTo} instead of the question for trusted own services. */
 	@GetMapping("/consent")
-	public ConsentView consent(@AuthenticationPrincipal CurrentUser me, @RequestParam @NotBlank String challenge) {
-		return service.consent(me, challenge);
+	public ConsentView consent(@AuthenticationPrincipal CurrentUser me,
+			@RequestHeader(name = Via.HEADER, required = false) String client, @RequestParam @NotBlank String challenge) {
+		return service.consent(me, Via.of(me, client), challenge);
 	}
 
 	@PostMapping("/consent/accept")
-	public Redirect acceptConsent(@AuthenticationPrincipal CurrentUser me, @Valid @RequestBody ConsentRequest request) {
-		return new Redirect(service.acceptConsent(me, request.challenge(), request.scopes()));
+	public Redirect acceptConsent(@AuthenticationPrincipal CurrentUser me,
+			@RequestHeader(name = Via.HEADER, required = false) String client, @Valid @RequestBody ConsentRequest request) {
+		return new Redirect(service.acceptConsent(me, Via.of(me, client), request.challenge(), request.scopes()));
 	}
 
 	@PostMapping("/consent/reject")
-	public Redirect rejectConsent(@AuthenticationPrincipal CurrentUser me, @Valid @RequestBody ChallengeRequest request) {
-		return new Redirect(service.rejectConsent(me, request.challenge()));
+	public Redirect rejectConsent(@AuthenticationPrincipal CurrentUser me,
+			@RequestHeader(name = Via.HEADER, required = false) String client, @Valid @RequestBody ChallengeRequest request) {
+		return new Redirect(service.rejectConsent(me, Via.of(me, client), request.challenge()));
 	}
 
 	/** Public (no JWT): which service wants the person signed out. */

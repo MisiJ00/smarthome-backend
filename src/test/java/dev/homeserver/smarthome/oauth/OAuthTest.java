@@ -260,7 +260,7 @@ class OAuthTest {
 		account.setActive(false);
 		users.saveAndFlush(account);
 		try {
-			String back = follow(service.login(current, "aal1", login));
+			String back = follow(service.login(current, dev.homeserver.smarthome.audit.Via.WEB, "aal1", login));
 			assertThat(param(back, "error")).isEqualTo("access_denied");
 			assertThat(back).doesNotContain("code=");
 			// And the HTTP API refuses the account's token right away
@@ -270,6 +270,193 @@ class OAuthTest {
 			account.setActive(true);
 			users.saveAndFlush(account);
 		}
+	}
+
+	// ---- The audit log ----
+
+	private static final String ADMIN = TestJwts.token(UUID.randomUUID(), "admin@example.com", "Admin");
+
+	/** The newest audit entries of one user (as an admin sees them), as JSON. */
+	private String auditOf(String jwt, String action) throws Exception {
+		long userId = ((Number) JsonPath.read(as(jwt, get("/api/me")).andReturn().getResponse().getContentAsString(), "$.id")).longValue();
+		return as(ADMIN, get("/api/audit").param("userId", String.valueOf(userId)).param("action", action).param("size", "50"))
+				.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+	}
+
+	private static void assertNoSecrets(String log, String... secrets) {
+		for (String secret : secrets) {
+			assertThat(secret).isNotBlank();
+			assertThat(log).as("the audit log must not contain " + secret.substring(0, Math.min(12, secret.length())) + "…").doesNotContain(secret);
+		}
+		assertThat(log).doesNotContain("access_token").doesNotContain("id_token").doesNotContain("refresh_token")
+				.doesNotContain("code_verifier").doesNotContain("challenge").doesNotContain("client_secret");
+	}
+
+	@Test
+	void signInAndConsentAreLoggedWithServiceAndScopesButWithoutSecrets() throws Exception {
+		var client = client(false);
+		String login = start(client, "openid profile");
+		String afterLogin = as(erika.jwt(), post("/api/oauth/login").header("X-Smarthome-Client", "web")
+				.contentType(MediaType.APPLICATION_JSON).content(challenge(login))).andExpect(status().isOk()).andReturn()
+				.getResponse().getContentAsString();
+		String consent = param(follow(JsonPath.read(afterLogin, "$.redirectTo")), "consent_challenge");
+		// Asking is not an event yet: the person has not answered
+		assertThat(JsonPath.<List<?>>read(auditOf(erika.jwt(), "sso_consent"), "$.items")).isEmpty();
+		String afterConsent = as(erika.jwt(), post("/api/oauth/consent/accept").header("X-Smarthome-Client", "web")
+				.contentType(MediaType.APPLICATION_JSON).content("{\"challenge\": \"" + consent + "\", \"scopes\": [\"openid\", \"profile\"]}"))
+				.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+		String code = param(follow(JsonPath.read(afterConsent, "$.redirectTo")), "code");
+		String token = exchange(client, code);
+
+		String logins = auditOf(erika.jwt(), "sso_login");
+		assertThat((String) JsonPath.read(logins, "$.items[0].result")).isEqualTo("accepted");
+		assertThat((String) JsonPath.read(logins, "$.items[0].via")).isEqualTo("web");
+		assertThat((String) JsonPath.read(logins, "$.items[0].userName")).isEqualTo("Erika");
+		assertThat((String) JsonPath.read(logins, "$.items[0].params.clientId")).isEqualTo(client.id());
+		assertThat((String) JsonPath.read(logins, "$.items[0].params.clientName")).isEqualTo("Test " + client.id());
+		assertThat((String) JsonPath.read(logins, "$.items[0].params.acr")).isEqualTo("aal1");
+		String consents = auditOf(erika.jwt(), "sso_consent");
+		assertThat((String) JsonPath.read(consents, "$.items[0].result")).isEqualTo("accepted");
+		assertThat(JsonPath.<List<String>>read(consents, "$.items[0].params.scopes")).containsExactly("openid", "profile");
+		assertThat((String) JsonPath.read(consents, "$.items[0].params.clientId")).isEqualTo(client.id());
+
+		// No challenge, code or token anywhere in what the log holds
+		assertNoSecrets(logins + consents, login, consent, code, JsonPath.read(token, "$.access_token"), JsonPath.read(token, "$.id_token"));
+	}
+
+	@Test
+	void aSkippedConsentOfATrustedServiceIsLoggedAsSkipped() throws Exception {
+		var client = client(true);
+		String consent = loginAndGetConsentChallenge(client, erika, "openid email");
+		as(erika.jwt(), get("/api/oauth/consent").param("challenge", consent)).andExpect(status().isOk());
+		String consents = auditOf(erika.jwt(), "sso_consent");
+		assertThat((String) JsonPath.read(consents, "$.items[0].result")).isEqualTo("skipped");
+		assertThat((String) JsonPath.read(consents, "$.items[0].params.reason")).isEqualTo("trusted");
+		assertThat(JsonPath.<List<String>>read(consents, "$.items[0].params.scopes")).containsExactly("openid", "email");
+		assertNoSecrets(consents, consent);
+	}
+
+	@Test
+	void aRefusedConsentIsLogged() throws Exception {
+		var client = client(false);
+		String consent = loginAndGetConsentChallenge(client, erika, "openid");
+		as(erika.jwt(), post("/api/oauth/consent/reject").contentType(MediaType.APPLICATION_JSON).content(challenge(consent)))
+				.andExpect(status().isOk());
+		String consents = auditOf(erika.jwt(), "sso_consent");
+		assertThat((String) JsonPath.read(consents, "$.items[0].result")).isEqualTo("rejected");
+		assertThat((String) JsonPath.read(consents, "$.items[0].params.reason")).isEqualTo("refused");
+		assertThat((String) JsonPath.read(consents, "$.items[0].params.clientId")).isEqualTo(client.id());
+	}
+
+	@Test
+	void aMachineAndAWrongAccountAreLoggedAsRefusedBeforeTheError() throws Exception {
+		long ki = users.findAll().stream().filter(u -> u.isMachine() && u.hasRole(Role.KI)).findFirst().orElseThrow().getId();
+		String aiToken = tokens.create(ki, "oauth audit test").secret();
+		var client = client(false);
+		String login = start(client, "openid");
+		as(aiToken, post("/api/oauth/login").contentType(MediaType.APPLICATION_JSON).content(challenge(login)))
+				.andExpect(status().isForbidden());
+		String log = as(ADMIN, get("/api/audit").param("userId", String.valueOf(ki)).param("action", "sso_login").param("size", "5"))
+				.andReturn().getResponse().getContentAsString();
+		assertThat((String) JsonPath.read(log, "$.items[0].result")).isEqualTo("rejected");
+		assertThat((String) JsonPath.read(log, "$.items[0].params.reason")).isEqualTo("machine");
+		assertThat((String) JsonPath.read(log, "$.items[0].via")).isEqualTo("ki");
+
+		String consent = loginAndGetConsentChallenge(client(false), erika, "openid");
+		var max = person("Max", "aal1");
+		as(max.jwt(), get("/api/oauth/consent").param("challenge", consent)).andExpect(status().isForbidden());
+		String other = auditOf(max.jwt(), "sso_consent");
+		assertThat((String) JsonPath.read(other, "$.items[0].result")).isEqualTo("rejected");
+		assertThat((String) JsonPath.read(other, "$.items[0].params.reason")).isEqualTo("wrong_account");
+	}
+
+	@Test
+	void aDeactivatedAccountsRefusalIsLogged() throws Exception {
+		as(erika.jwt(), get("/api/me")).andExpect(status().isOk());
+		var account = users.findAll().stream().filter(u -> erika.identity().equals(u.getIdentityId())).findFirst().orElseThrow();
+		var current = CurrentUser.of(account, "erika@example.com");
+		var client = client(false);
+		String login = start(client, "openid");
+		account.setActive(false);
+		users.saveAndFlush(account);
+		try {
+			follow(service.login(current, dev.homeserver.smarthome.audit.Via.WEB, "aal1", login));
+		}
+		finally {
+			account.setActive(true);
+			users.saveAndFlush(account);
+		}
+		String logins = auditOf(erika.jwt(), "sso_login");
+		assertThat((String) JsonPath.read(logins, "$.items[0].result")).isEqualTo("rejected");
+		assertThat((String) JsonPath.read(logins, "$.items[0].params.reason")).isEqualTo("deactivated");
+		assertNoSecrets(logins, login);
+	}
+
+	@Test
+	void logoutIsLoggedForAcceptingAndDeclining() throws Exception {
+		String accepted = logoutChallenge();
+		mvc.perform(post("/api/oauth/logout/accept").contentType(MediaType.APPLICATION_JSON).content(challenge(accepted)))
+				.andExpect(status().isOk());
+		String declined = logoutChallenge();
+		mvc.perform(post("/api/oauth/logout/reject").contentType(MediaType.APPLICATION_JSON).content(challenge(declined)))
+				.andExpect(status().isNoContent());
+		String log = auditOf(erika.jwt(), "sso_logout");
+		assertThat(JsonPath.<List<String>>read(log, "$.items[*].result")).containsExactly("rejected", "accepted");
+		assertThat((String) JsonPath.read(log, "$.items[0].userName")).isEqualTo("Erika");
+		assertThat((String) JsonPath.read(log, "$.items[0].via")).isEqualTo("web");
+		assertNoSecrets(log, accepted, declined);
+	}
+
+	@Test
+	void textsFromTheServiceAreShortenedAndCleaned() throws Exception {
+		String id = "test-" + UUID.randomUUID().toString().substring(0, 8);
+		String name = "Dienst\t" + "x".repeat(300);
+		var response = browser.send(HttpRequest.newBuilder(URI.create(TestcontainersConfiguration.hydraAdminUrl(hydra) + "/admin/clients"))
+				.header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString("{\"client_id\": \"" + id
+						+ "\", \"client_name\": \"" + name.replace("\t", "\\t") + "\", \"redirect_uris\": [\"" + REDIRECT
+						+ "\"], \"grant_types\": [\"authorization_code\"], \"response_types\": [\"code\"], \"scope\": \"openid\", "
+						+ "\"token_endpoint_auth_method\": \"none\"}")).build(), HttpResponse.BodyHandlers.ofString());
+		assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
+		var client = new Client(id, "v".repeat(43), "x");
+		// The challenge only needs to exist: use the real PKCE pair of a normal client for the authorization request
+		var pkce = client(false);
+		String url = hydraPublic() + "/oauth2/auth?client_id=" + id + "&response_type=code&scope=openid&redirect_uri=" + encode(REDIRECT)
+				+ "&state=" + UUID.randomUUID() + "&code_challenge=" + pkce.challenge() + "&code_challenge_method=S256";
+		var started = browser.send(HttpRequest.newBuilder(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofString());
+		String login = param(started.headers().firstValue("location").orElseThrow(), "login_challenge");
+		as(erika.jwt(), post("/api/oauth/login").contentType(MediaType.APPLICATION_JSON).content(challenge(login))).andExpect(status().isOk());
+		String logins = auditOf(erika.jwt(), "sso_login");
+		String logged = JsonPath.read(logins, "$.items[0].params.clientName");
+		assertThat(logged).hasSize(OAuthService.MAX_LOGGED_TEXT + 1).endsWith("…").doesNotContain("\t");
+		assertThat((String) JsonPath.read(logins, "$.items[0].params.clientId")).isEqualTo(client.id());
+	}
+
+	@Test
+	void anAnswerHydraRefusesLeavesNoEntry() throws Exception {
+		var fresh = person("Frieda", "aal1");
+		as(fresh.jwt(), post("/api/oauth/login").contentType(MediaType.APPLICATION_JSON).content(challenge("does-not-exist")))
+				.andExpect(status().isBadRequest());
+		as(fresh.jwt(), post("/api/oauth/consent/accept").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"challenge\": \"does-not-exist\", \"scopes\": [\"openid\"]}")).andExpect(status().isBadRequest());
+		assertThat(JsonPath.<List<?>>read(auditOf(fresh.jwt(), "sso_login"), "$.items")).isEmpty();
+		assertThat(JsonPath.<List<?>>read(auditOf(fresh.jwt(), "sso_consent"), "$.items")).isEmpty();
+	}
+
+	/** A logout challenge: Hydra only has a logout to ask for where it remembered a login, so remember one by hand. */
+	private String logoutChallenge() throws Exception {
+		var client = client(true);
+		String login = start(client, "openid");
+		var accept = browser.send(HttpRequest.newBuilder(URI.create(TestcontainersConfiguration.hydraAdminUrl(hydra)
+				+ "/admin/oauth2/auth/requests/login/accept?login_challenge=" + login))
+				.header("Content-Type", "application/json").PUT(HttpRequest.BodyPublishers.ofString(
+						"{\"subject\": \"" + erika.identity() + "\", \"remember\": true, \"remember_for\": 3600}"))
+				.build(), HttpResponse.BodyHandlers.ofString());
+		String consent = param(follow(JsonPath.read(accept.body(), "$.redirect_to")), "consent_challenge");
+		String response = as(erika.jwt(), get("/api/oauth/consent").param("challenge", consent)).andReturn().getResponse().getContentAsString();
+		var token = exchange(client, param(follow(JsonPath.read(response, "$.redirectTo")), "code"));
+		var logout = browser.send(HttpRequest.newBuilder(URI.create(hydraPublic() + "/oauth2/sessions/logout?id_token_hint="
+				+ encode(JsonPath.read(token, "$.id_token")))).GET().build(), HttpResponse.BodyHandlers.ofString());
+		return param(logout.headers().firstValue("location").orElseThrow(), "logout_challenge");
 	}
 
 	// ---- The browser and the client ----
