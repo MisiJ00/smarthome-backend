@@ -1,0 +1,20 @@
+# Hydra for the backend tests: in memory, the addresses of the web interface as in production
+serve:
+  public:
+    port: 4444
+  admin:
+    port: 4445
+urls:
+  self:
+    issuer: http://localhost:4444
+  login: http://localhost:5173/oauth/login
+  consent: http://localhost:5173/oauth/consent
+  logout: http://localhost:5173/oauth/logout
+  post_logout_redirect: http://localhost:5173/
+oauth2:
+  pkce:
+    enforced: true
+strategies:
+  access_token: opaque
+log:
+  level: warn

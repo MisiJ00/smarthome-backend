@@ -69,6 +69,32 @@ public class TestcontainersConfiguration {
 		return "http://" + kratos.getHost() + ":" + kratos.getMappedPort(4433);
 	}
 
+	/** Real Hydra, in memory: the OAuth2 server whose login and consent requests the backend answers. */
+	@Bean
+	GenericContainer<?> hydraContainer() {
+		return new GenericContainer<>(DockerImageName.parse("oryd/hydra:v26.2.0"))
+				.withCopyFileToContainer(MountableFile.forClasspathResource("hydra/"), "/etc/config/hydra/")
+				.withEnv("DSN", "memory")
+				.withEnv("SECRETS_SYSTEM", "test-system-secret-0123456789abcdef")
+				.withEnv("SECRETS_COOKIE", "test-cookie-secret-0123456789abcdef")
+				.withCommand("serve", "all", "--dev", "--config", "/etc/config/hydra/hydra.yml")
+				.withExposedPorts(4444, 4445)
+				.waitingFor(Wait.forHttp("/health/ready").forPort(4445));
+	}
+
+	@Bean
+	DynamicPropertyRegistrar hydraProperties(GenericContainer<?> hydraContainer) {
+		return registry -> registry.add("smarthome.hydra.admin-url", () -> hydraAdminUrl(hydraContainer));
+	}
+
+	public static String hydraAdminUrl(GenericContainer<?> hydra) {
+		return "http://" + hydra.getHost() + ":" + hydra.getMappedPort(4445);
+	}
+
+	public static String hydraPublicUrl(GenericContainer<?> hydra) {
+		return "http://" + hydra.getHost() + ":" + hydra.getMappedPort(4444);
+	}
+
 	@Bean
 	DynamicPropertyRegistrar authProperties() {
 		return registry -> {
