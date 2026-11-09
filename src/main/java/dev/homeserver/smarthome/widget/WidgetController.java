@@ -65,7 +65,7 @@ public class WidgetController {
 	/** Has to contain each of the caller's widgets exactly once (400 otherwise). */
 	@PutMapping("/order")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
-	public void reorder(@AuthenticationPrincipal CurrentUser me, @Valid @RequestBody ReorderRequest request) {
+	public void reorder(@AuthenticationPrincipal CurrentUser me, @Valid @RequestBody WidgetOrderRequest request) {
 		service.reorder(me, request.widgetIds());
 	}
 
@@ -92,7 +92,7 @@ public class WidgetController {
 	public record UpdateWidgetRequest(WidgetKind kind, Map<String, Object> config) {
 	}
 
-	public record ReorderRequest(@NotNull List<Long> widgetIds) {
+	public record WidgetOrderRequest(@NotNull List<Long> widgetIds) {
 	}
 
 	public record WidgetResponse(long id, WidgetKind kind, TargetType targetType, long targetId,
