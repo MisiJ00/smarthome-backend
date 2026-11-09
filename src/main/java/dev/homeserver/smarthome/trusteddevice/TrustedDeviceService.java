@@ -182,7 +182,7 @@ public class TrustedDeviceService {
 		if (!device.isRevoked()) {
 			device.revoke();
 			audit.record(by, via, null, AUDIT_ACTION,
-					Map.of("trustedDeviceId", device.getId(), "name", device.getName(), "userId", userId),
+					Map.of("trustedDeviceId", device.getId(), "name", device.getName(), "userId", userId, "kind", device.getKind()),
 					AuditResult.REVOKED, null);
 		}
 		return device;

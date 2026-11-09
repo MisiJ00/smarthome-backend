@@ -257,6 +257,8 @@ class WebAuthnDeviceTest {
 		Authenticator passkey = new Authenticator();
 		long deviceId = id(register(erika.jwt(), passkey, "Laptop").andReturn().getResponse().getContentAsString());
 		as(erika.jwt(), delete("/api/me/trusted-devices/" + deviceId)).andExpect(status().isNoContent());
+		// The audit entry says it was a browser passkey, not a phone
+		as(ADMIN, get("/api/audit").param("result", "revoked")).andExpect(jsonPath("$.items[0].params.kind").value("webauthn"));
 		long confirmation = requestUnlock(erika.jwt());
 		as(erika.jwt(), post("/api/confirmations/" + confirmation + "/challenge")).andExpect(status().isConflict());
 	}
